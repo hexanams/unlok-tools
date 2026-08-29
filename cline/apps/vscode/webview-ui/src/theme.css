@@ -1,6 +1,6 @@
 /* Editor theme mapping */
 @theme {
-	--color-cline: #9663f1;
+	--color-cline: #cf8b2b;
 	--color-background: var(--vscode-sideBar-background);
 	--color-border: var(--vscode-focusBorder);
 	--color-border-panel: var(--vscode-panel-border);
@@ -31,8 +31,15 @@
 	--color-input-error-foreground: var(--vscode-inputValidation-errorForeground, #8f1f1f);
 	--color-input-warning-background: var(--vscode-inputValidation-warningBackground, #663c00);
 	--color-input-warning-foreground: var(--vscode-inputValidation-warningForeground, #7e5100);
-	--color-selection: var(--vscode-list-activeSelectionBackground);
-	--color-selection-foreground: var(--vscode-list-activeSelectionForeground);
+	/* Unlok's own accent, not the raw --vscode-list-activeSelectionBackground
+	 * theme var -- that reflects whatever color the editor's color theme
+	 * picked (often blue), unrelated to Unlok's own branding. Confirmed live:
+	 * a selected follow-up-question option showed the host theme's blue
+	 * instead of the ochre accent used everywhere else Unlok controls
+	 * directly (buttons, focus outline, badges). White foreground text
+	 * keeps the same contrast the raw blue background already relied on. */
+	--color-selection: var(--color-cline);
+	--color-selection-foreground: white;
 	--color-selection-inactive: var(--vscode-editor-inactiveSelectionBackground);
 	--color-button-background: var(--vscode-button-background);
 	--color-button-hover: var(--vscode-button-hoverBackground);
@@ -64,14 +71,19 @@
 	--color-toolbar-hover: var(--vscode-toolbar-hoverBackground);
 	--color-diff-added: var(--vscode-diffEditor-insertedTextBackground);
 	--color-diff-removed: var(--vscode-diffEditor-removedTextBackground);
-	--color-error: var(--vscode-errorForeground);
-	--color-error-icon: var(--vscode-problemsErrorIcon-foreground);
 	--color-failed-icon: var(--vscode-testing-iconFailed);
-	--color-error: var(--vscode-errorForeground, #c42b2b);
-	--color-error-icon: var(--vscode-problemsErrorIcon-foreground, #c42b2b);
+	--color-error: #e09a7a;
+	--color-error-icon: #e09a7a;
 	--color-description: var(--vscode-descriptionForeground);
-	--color-success: var(--vscode-charts-green);
-	--color-warning: var(--vscode-charts-yellow);
+	--color-success: #8fb894;
+	--color-warning: #e0a44b;
+	/* Fixed brand identity for the diff card, independent of the host's diff-editor colors
+	   (which theme.css already exposes above as --color-diff-added/--color-diff-removed for
+	   inline markdown diff highlighting — this pair is scoped to DiffEditRow's own card). */
+	--color-diff-add-bg: #15251b;
+	--color-diff-add-fg: #6fbf8a;
+	--color-diff-del-bg: #251717;
+	--color-diff-del-fg: #d98b7a;
 	--font-base:
 		var(--vscode-font-family), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell,
 		"Open Sans", "Helvetica Neue", sans-serif;
@@ -151,6 +163,21 @@
 	}
 }
 
+/*
+ * The @vscode/webview-ui-toolkit <vscode-button> web component reads
+ * --vscode-button-background/--vscode-button-hoverBackground directly off
+ * itself -- it does not go through Tailwind's --color-* tokens above, so
+ * redefining --color-cline alone never touched it, leaving every primary
+ * button (Sign in with Unlok, Request Increase, etc.) on the host theme's
+ * native blue. Override it here, scoped to primary buttons only --
+ * secondary/icon-appearance buttons keep the host's muted styling on
+ * purpose, that contrast is what marks a button as the primary action.
+ */
+vscode-button:not([appearance="secondary"]):not([appearance="icon"]) {
+	--vscode-button-background: var(--color-cline);
+	--vscode-button-hoverBackground: color-mix(in srgb, var(--color-cline) 82%, black);
+}
+
 @theme inline {
 	--radius-sm: calc(var(--radius) - 4px);
 	--radius-md: calc(var(--radius) - 2px);
@@ -193,7 +220,7 @@
 }
 
 :root {
-	--radius: 0.625rem;
+	--radius: 0.875rem;
 	--background: oklch(1 0 0);
 	--foreground: oklch(0.145 0 0);
 	--card: oklch(1 0 0);

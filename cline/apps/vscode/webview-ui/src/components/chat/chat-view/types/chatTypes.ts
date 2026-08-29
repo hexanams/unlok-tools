@@ -60,6 +60,15 @@ export interface ChatState {
 	// PlanRoutingPolicyDropdown.tsx for why).
 	planRoutingPolicy: string
 	setPlanRoutingPolicy: React.Dispatch<React.SetStateAction<string>>
+	// Local UI feedback around generatePlan's request/response round trip --
+	// the RPC itself has no streaming/progress signal, so this is the only
+	// way the Plan screen can show "generating" instead of looking inert,
+	// and the only way a failure (no credential, backend error, network)
+	// ever reaches the user instead of only a console.error.
+	planGenerating: boolean
+	setPlanGenerating: React.Dispatch<React.SetStateAction<boolean>>
+	planGenerationError: string | null
+	setPlanGenerationError: React.Dispatch<React.SetStateAction<string | null>>
 
 	// Refs
 	textAreaRef: React.RefObject<HTMLTextAreaElement>

@@ -24,6 +24,8 @@ export function useChatState(messages: ClineMessage[]): ChatState {
 	const [pendingResponse, setPendingResponse] = useState<PendingResponse | undefined>(undefined)
 	const [planModeSelected, setPlanModeSelected] = useState(false)
 	const [planRoutingPolicy, setPlanRoutingPolicy] = useState("balanced")
+	const [planGenerating, setPlanGenerating] = useState(false)
+	const [planGenerationError, setPlanGenerationError] = useState<string | null>(null)
 
 	// Refs
 	const textAreaRef = useRef<HTMLTextAreaElement>(null)
@@ -87,6 +89,10 @@ export function useChatState(messages: ClineMessage[]): ChatState {
 		setPlanModeSelected,
 		planRoutingPolicy,
 		setPlanRoutingPolicy,
+		planGenerating,
+		setPlanGenerating,
+		planGenerationError,
+		setPlanGenerationError,
 
 		// Refs
 		textAreaRef,

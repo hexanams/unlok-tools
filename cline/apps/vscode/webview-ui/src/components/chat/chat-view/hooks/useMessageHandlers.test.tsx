@@ -89,6 +89,10 @@ function makeChatState(messages: ClineMessage[], overrides: Partial<ChatState> =
 		setPlanModeSelected: vi.fn(),
 		planRoutingPolicy: "balanced",
 		setPlanRoutingPolicy: vi.fn(),
+		planGenerating: false,
+		setPlanGenerating: vi.fn(),
+		planGenerationError: null,
+		setPlanGenerationError: vi.fn(),
 		textAreaRef: { current: null },
 		lastMessage: last,
 		secondLastMessage: messages.at(-2),
@@ -700,5 +704,33 @@ describe("useMessageHandlers — send routing", () => {
 		expect(newTask).not.toHaveBeenCalled()
 		expect(askResponse).not.toHaveBeenCalled()
 		expect(setInputValue).toHaveBeenCalledWith("")
+	})
+
+	// Regression: a failed generatePlan call (no credential, backend error,
+	// network) previously only reached a console.error -- from the user's
+	// side, the input cleared and nothing else ever happened, indistinguishable
+	// from the request silently doing nothing. planGenerationError must carry
+	// the real failure through to the UI (see PlanEmptyState.tsx).
+	it("surfaces a generatePlan failure instead of failing silently", async () => {
+		mockTurnState = { phase: "idle", seq: 1 }
+		generatePlan.mockRejectedValueOnce(new Error("Plan generation needs an anthropic credential on file."))
+		const setPlanGenerating = vi.fn()
+		const setPlanGenerationError = vi.fn()
+		const { result } = renderHook(() =>
+			useMessageHandlers(
+				[],
+				makeChatState([], { planModeSelected: true, setPlanGenerating, setPlanGenerationError }),
+			),
+		)
+
+		await act(async () => {
+			await result.current.handleSendMessage("fix the escalation flag", [], [])
+		})
+
+		expect(setPlanGenerationError).toHaveBeenCalledWith("Plan generation needs an anthropic credential on file.")
+		// true while in flight, then false once the request settles -- not
+		// left stuck on a permanent loading state after a failure.
+		expect(setPlanGenerating).toHaveBeenCalledWith(true)
+		expect(setPlanGenerating).toHaveBeenLastCalledWith(false)
 	})
 })

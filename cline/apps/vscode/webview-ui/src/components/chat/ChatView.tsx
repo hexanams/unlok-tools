@@ -5,6 +5,7 @@ import { getApiMetrics, getLastApiReqTotalTokens } from "@shared/getApiMetrics"
 import { BooleanRequest, StringRequest } from "@shared/proto/cline/common"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useMount } from "react-use"
+import { PlanEmptyState } from "@/components/plan/PlanEmptyState"
 import { PlanView } from "@/components/plan/PlanView"
 import { usePlanState } from "@/components/plan/usePlanState"
 import { useExtensionState } from "@/context/ExtensionStateContext"
@@ -463,12 +464,16 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 		)
 	}
 
-	if (chatState.planModeSelected && planState) {
+	if (chatState.planModeSelected) {
 		return (
 			<ChatLayout isHidden={isHidden}>
 				<div className="flex flex-col flex-1 overflow-hidden">
 					{showNavbar && <Navbar />}
-					<PlanView state={planState} />
+					{planState ? (
+						<PlanView state={planState} />
+					) : (
+						<PlanEmptyState error={chatState.planGenerationError} generating={chatState.planGenerating} />
+					)}
 				</div>
 				<footer className="bg-(--vscode-sidebar-background) flex flex-col" style={{ gridRow: "2" }}>
 					<InputSection

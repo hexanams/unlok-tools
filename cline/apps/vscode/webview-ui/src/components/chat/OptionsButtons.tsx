@@ -4,9 +4,16 @@ import styled from "styled-components"
 import { CODE_BLOCK_BG_COLOR } from "@/components/common/CodeBlock"
 import { TaskServiceClient } from "@/services/grpc-client"
 
+// Selected/hover state uses Unlok's own accent (--color-cline), not the raw
+// VS Code --vscode-focusBorder theme variable -- that var reflects whatever
+// blue/etc the *editor's* color theme picked, unrelated to Unlok's own
+// branding, and isn't something this extension should repaint globally (it
+// drives every focus ring in the editor, not just this component). Scoped
+// override here, matching the same reasoning theme.css already documents
+// for the vscode-button primary-color override.
 const OptionButton = styled.button<{ $isSelected?: boolean; $isNotSelectable?: boolean }>`
 	padding: 8px 12px;
-	background: ${(props) => (props.$isSelected ? "var(--vscode-focusBorder)" : CODE_BLOCK_BG_COLOR)};
+	background: ${(props) => (props.$isSelected ? "var(--color-cline)" : CODE_BLOCK_BG_COLOR)};
 	color: ${(props) => (props.$isSelected ? "white" : "var(--vscode-input-foreground)")};
 	border: 1px solid var(--vscode-editorGroup-border);
 	border-radius: 2px;
@@ -18,7 +25,7 @@ const OptionButton = styled.button<{ $isSelected?: boolean; $isNotSelectable?: b
 		!props.$isNotSelectable &&
 		`
 		&:hover {
-			background: var(--vscode-focusBorder);
+			background: var(--color-cline);
 			color: white;
 		}
 	`}

@@ -51,6 +51,8 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 		lastMessage,
 		planModeSelected,
 		planRoutingPolicy,
+		setPlanGenerating,
+		setPlanGenerationError,
 	} = chatState
 	const cancelInFlightRef = useRef(false)
 	const pendingResponseIdRef = useRef(0)
@@ -87,9 +89,18 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 			if (planModeSelected && messageToSend) {
 				setInputValue("")
 				setActiveQuote(null)
-				await PlanServiceClient.generatePlan(
-					GeneratePlanRequest.create({ goal: messageToSend, routingPolicy: planRoutingPolicy }),
-				).catch((err) => console.error("Failed to generate plan:", err))
+				setPlanGenerationError(null)
+				setPlanGenerating(true)
+				try {
+					await PlanServiceClient.generatePlan(
+						GeneratePlanRequest.create({ goal: messageToSend, routingPolicy: planRoutingPolicy }),
+					)
+				} catch (err) {
+					console.error("Failed to generate plan:", err)
+					setPlanGenerationError(err instanceof Error ? err.message : String(err))
+				} finally {
+					setPlanGenerating(false)
+				}
 				return
 			}
 
