@@ -42,6 +42,36 @@ describe("SdkProviderChangeCoordinator", () => {
 		expect(options.sessions.replaceActiveSession).not.toHaveBeenCalled()
 	})
 
+	// Regression: Unlok routes every vendor model through the SAME provider
+	// id ("unlok") -- only the model id actually picks which one. A
+	// provider-only comparison silently kept a live session on its original
+	// model after the user picked a different one in the model picker
+	// (commitModelSelection.ts writes the new model id correctly; nothing
+	// downstream ever rebuilt the session to actually use it).
+	it("restarts when the model id changes but the provider stays the same", async () => {
+		const activeSession = makeActiveSession()
+		const { coordinator, options } = makeCoordinator({ activeSession })
+
+		coordinator.handleApiConfigurationChanged(
+			{ actModeApiProvider: "unlok", actModeUnlokModelId: "gemini/gemini-pro-latest" } as never,
+			{ actModeApiProvider: "unlok", actModeUnlokModelId: "openai/gpt-5" } as never,
+		)
+
+		await vi.waitFor(() => expect(options.sessions.replaceActiveSession).toHaveBeenCalledOnce())
+	})
+
+	it("does nothing when neither the provider nor the model id changed", () => {
+		const activeSession = makeActiveSession()
+		const { coordinator, options } = makeCoordinator({ activeSession })
+
+		coordinator.handleApiConfigurationChanged(
+			{ actModeApiProvider: "unlok", actModeUnlokModelId: "gemini/gemini-pro-latest" } as never,
+			{ actModeApiProvider: "unlok", actModeUnlokModelId: "gemini/gemini-pro-latest" } as never,
+		)
+
+		expect(options.sessions.replaceActiveSession).not.toHaveBeenCalled()
+	})
+
 	it("does nothing without an active session", () => {
 		const { coordinator, options } = makeCoordinator()
 

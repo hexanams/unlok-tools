@@ -3,6 +3,7 @@ import type { Mode } from "@shared/storage/types"
 import type { StateManager } from "@/core/storage/StateManager"
 import { toLegacyApiProvider } from "@/shared/model-catalog/provider-helpers"
 import { Logger } from "@/shared/services/Logger"
+import { getProviderModelIdKey } from "@/shared/storage/provider-keys"
 import type { SdkMessageCoordinator } from "./sdk-message-coordinator"
 import type { SdkSessionConfigBuilder } from "./sdk-session-config-builder"
 import type { SdkSessionLifecycle } from "./sdk-session-lifecycle"
@@ -37,6 +38,26 @@ function providerForMode(config: ApiConfiguration, mode: Mode): string | undefin
 	return provider === undefined ? undefined : toLegacyApiProvider(provider)
 }
 
+// A provider-only comparison misses the common case for a provider like
+// "unlok", where every vendor model is reached through the SAME provider id
+// and only the model id actually picks which one -- confirmed live: picking
+// a different model in the picker updated the displayed selection and
+// storage (commitModelSelection.ts already writes it correctly), but the
+// live SDK session kept answering from whatever model it was built with,
+// since previousProvider === nextProvider short-circuited before ever
+// reaching a rebuild. Reading the mode-specific model id key (the same one
+// commitModelSelection.ts writes to, via getProviderModelIdKey) closes that
+// gap for every provider, not just Unlok -- switching models within any
+// single-provider vendor (OpenAI gpt-4o -> gpt-5, etc.) now also rebuilds.
+function modelIdForMode(config: ApiConfiguration, mode: Mode, provider: string | undefined): string | undefined {
+	if (!provider) {
+		return undefined
+	}
+	const key = getProviderModelIdKey(provider, mode)
+	const value = (config as Record<string, unknown>)[key]
+	return typeof value === "string" ? value : undefined
+}
+
 export class SdkProviderChangeCoordinator {
 	constructor(private readonly options: SdkProviderChangeCoordinatorOptions) {}
 
@@ -44,8 +65,10 @@ export class SdkProviderChangeCoordinator {
 		const mode = this.getCurrentMode()
 		const previousProvider = providerForMode(previous, mode)
 		const nextProvider = providerForMode(next, mode)
+		const previousModelId = modelIdForMode(previous, mode, previousProvider)
+		const nextModelId = modelIdForMode(next, mode, nextProvider)
 
-		if (previousProvider === nextProvider) {
+		if (previousProvider === nextProvider && previousModelId === nextModelId) {
 			return
 		}
 
@@ -56,7 +79,8 @@ export class SdkProviderChangeCoordinator {
 		}
 
 		Logger.log(
-			`[SdkController] Active provider changed for ${mode}: ${previousProvider ?? "none"} -> ${nextProvider ?? "none"}`,
+			`[SdkController] Active provider/model changed for ${mode}: ` +
+				`${previousProvider ?? "none"}/${previousModelId ?? "none"} -> ${nextProvider ?? "none"}/${nextModelId ?? "none"}`,
 		)
 
 		this.options.rebuilds.request("provider", () => this.restartActiveSessionForProviderChange())
