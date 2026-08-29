@@ -3,14 +3,15 @@ import { combineCommandSequences } from "@shared/combineCommandSequences"
 import { combineHookSequences } from "@shared/combineHookSequences"
 import { getApiMetrics, getLastApiReqTotalTokens } from "@shared/getApiMetrics"
 import { BooleanRequest, StringRequest } from "@shared/proto/cline/common"
-import { useCallback, useEffect, useMemo, useRef } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useMount } from "react-use"
+import { PlanView } from "@/components/plan/PlanView"
+import { usePlanState } from "@/components/plan/usePlanState"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { useShowNavbar } from "@/context/PlatformContext"
 import { useNormalizedApiConfiguration } from "@/hooks/useNormalizedApiConfiguration"
 import { FileServiceClient, UiServiceClient } from "@/services/grpc-client"
 import { Navbar } from "../menu/Navbar"
-import AutoApproveBar from "./auto-approve-menu/AutoApproveBar"
 // Import utilities and hooks from the new structure
 import {
 	ActionButtons,
@@ -29,11 +30,14 @@ import {
 	useScrollBehavior,
 	WelcomeSection,
 } from "./chat-view"
+import { getButtonConfigFromState } from "./chat-view/shared/buttonConfig"
 import {
 	hasPendingMessageConfirmation,
 	isPendingResponseUnconfirmed,
 	withPendingUserMessage,
 } from "./chat-view/utils/pendingResponse"
+import CostContextStrip from "./task-header/CostContextStrip"
+import { UnlokSignInGate } from "./UnlokSignInGate"
 
 interface ChatViewProps {
 	isHidden: boolean
@@ -59,12 +63,15 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 		checkpointRestoreInput,
 		queuedPrompts,
 		turnState,
+		apiConfiguration,
+		foregroundCommandRunning,
 	} = useExtensionState()
 	const isProdHostedApp = userInfo?.apiBaseUrl === "https://app.cline.bot"
 	const shouldShowQuickWins = isProdHostedApp && (!taskHistory || taskHistory.length < QUICK_WINS_HISTORY_THRESHOLD)
 
 	// Use custom hooks for state management
 	const chatState = useChatState(messages)
+	const planState = usePlanState()
 	const {
 		setInputValue,
 		selectedImages,
@@ -217,6 +224,54 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 	// Use message handlers hook
 	const messageHandlers = useMessageHandlers(messages, chatState)
 
+	// Single source of truth for both the footer's choice buttons (Approve/Reject,
+	// Proceed While Running, ...) and the composer's own Stop button --
+	// buttonConfig.stoppable drives Stop's visibility, see InputSection below.
+	const buttonConfig = useMemo(
+		() => getButtonConfigFromState(messages, turnState, mode, foregroundCommandRunning),
+		[messages, turnState, mode, foregroundCommandRunning],
+	)
+	const handleStop = useCallback(() => {
+		void messageHandlers.executeButtonAction(
+			"cancel",
+			chatState.inputValue,
+			chatState.selectedImages,
+			chatState.selectedFiles,
+		)
+	}, [messageHandlers, chatState.inputValue, chatState.selectedImages, chatState.selectedFiles])
+
+	// The composer's footnote normally shows a static per-mode description
+	// ("In Auto mode, Cline will..."). Once at least one Unlok-routed turn has
+	// actually completed, replace it with what really happened -- the tier
+	// Unlok picked for that turn -- rather than a generic description that
+	// never reflects the live routing decision. Falls back to undefined (the
+	// static description) for a brand-new task or a non-Unlok/non-routed
+	// provider, where there's no real routing data to show.
+	const lastTurnRoutingNote = useMemo(() => {
+		for (let i = messages.length - 1; i >= 0; i--) {
+			const m = messages[i]
+			if (m.say !== "api_req_started" || !m.text) {
+				continue
+			}
+			try {
+				const info = JSON.parse(m.text)
+				if (info.cost == null) {
+					continue // still in flight -- routing isn't final yet
+				}
+				const tier: string | undefined = info.routing?.finalTier
+				if (!tier) {
+					continue
+				}
+				const tierLabel = tier.charAt(0).toUpperCase() + tier.slice(1)
+				const escalatedNote = info.routing?.escalated ? " after escalating" : ""
+				return `${tierLabel} tier picked for this turn${escalatedNote}. Escalations are shown before they run.`
+			} catch {
+				// Malformed api_req JSON -- keep walking backward for an earlier, valid one.
+			}
+		}
+		return undefined
+	}, [messages])
+
 	const { selectedModelInfo } = useNormalizedApiConfiguration(mode)
 
 	const selectFilesAndImages = useCallback(async () => {
@@ -226,12 +281,7 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 					value: selectedModelInfo.supportsImages,
 				}),
 			)
-			if (
-				response &&
-				response.values1 &&
-				response.values2 &&
-				(response.values1.length > 0 || response.values2.length > 0)
-			) {
+			if (response?.values1 && response.values2 && (response.values1.length > 0 || response.values2.length > 0)) {
 				const currentTotal = selectedImages.length + selectedFiles.length
 				const availableSlots = MAX_IMAGES_AND_FILES_PER_MESSAGE - currentTotal
 
@@ -252,7 +302,7 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 		} catch (error) {
 			console.error("Error selecting images & files:", error)
 		}
-	}, [selectedModelInfo.supportsImages])
+	}, [selectedModelInfo.supportsImages, selectedFiles.length, selectedImages.length, setSelectedFiles, setSelectedImages])
 
 	const shouldDisableFilesAndImages = selectedImages.length + selectedFiles.length >= MAX_IMAGES_AND_FILES_PER_MESSAGE
 
@@ -277,7 +327,7 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 		)
 
 		return cleanup
-	}, [isHidden])
+	}, [isHidden, textAreaRef.current?.focus])
 
 	// Set up addToInput subscription
 	useEffect(() => {
@@ -288,7 +338,7 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 					if (event.value) {
 						setInputValue((prevValue) => {
 							const newText = event.value
-							const newTextWithNewline = newText + "\n"
+							const newTextWithNewline = `${newText}\n`
 							return prevValue ? `${prevValue}\n${newTextWithNewline}` : newTextWithNewline
 						})
 						// Add scroll to bottom after state update
@@ -311,7 +361,7 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 		)
 
 		return cleanup
-	}, [])
+	}, [setInputValue, textAreaRef.current])
 
 	useMount(() => {
 		// NOTE: the vscode window needs to be focused for this to work
@@ -327,7 +377,7 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 		return () => {
 			clearTimeout(timer)
 		}
-	}, [isHidden, sendingDisabled, enableButtons])
+	}, [isHidden, sendingDisabled, enableButtons, textAreaRef.current?.focus])
 
 	const visibleMessages = useMemo(() => {
 		return filterVisibleMessages(modifiedMessages)
@@ -359,7 +409,9 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 		if (taskTs !== previousTaskTs || queuedPromptCount <= previousCount) {
 			return
 		}
-		// Queueing is a deliberate send, so re-engage bottom pinning like handleSendMessage does.
+		// Queueing is a deliberate send, so briefly re-engage bottom pinning like handleSendMessage
+		// does -- just long enough to reveal the queue banner, not for the rest of the turn still
+		// streaming above it.
 		disableAutoScrollRef.current = false
 		scrollToBottomSmooth()
 		// Settle with an instant scroll once the footer's layout change has landed.
@@ -368,12 +420,72 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 				scrollToBottomAuto()
 			}
 		}, 50)
+		const grace = setTimeout(() => {
+			disableAutoScrollRef.current = true
+		}, 250)
+		return () => clearTimeout(grace)
 	}, [queuedPromptCount, taskTs, scrollToBottomSmooth, scrollToBottomAuto, disableAutoScrollRef])
 
 	const placeholderText = useMemo(() => {
+		if (chatState.planModeSelected) {
+			return planState ? "Change a step, or add one" : "Describe the task to plan"
+		}
 		const text = task ? "Type a message..." : "Type your task here..."
 		return text
-	}, [task])
+	}, [task, chatState.planModeSelected, planState])
+
+	// Once a sign-in flow's "Start a chat" is clicked, don't show the connected
+	// screen again for the rest of this window session (persists across a
+	// window reload, not across a full VS Code restart -- sessionStorage is
+	// the right scope here, this isn't meant to be a durable setting).
+	const [hasProceededPastConnect, setHasProceededPastConnect] = useState(() => {
+		try {
+			return sessionStorage.getItem("unlok:proceededPastConnect") === "true"
+		} catch {
+			return false
+		}
+	})
+	const handleProceedPastConnect = useCallback(() => {
+		try {
+			sessionStorage.setItem("unlok:proceededPastConnect", "true")
+		} catch {
+			// sessionStorage may be unavailable in some webview contexts; the
+			// in-memory state below still lets the user proceed this session.
+		}
+		setHasProceededPastConnect(true)
+	}, [])
+
+	if (!apiConfiguration?.unlokApiKey || !hasProceededPastConnect) {
+		return (
+			<ChatLayout isHidden={isHidden}>
+				<UnlokSignInGate isConnected={!!apiConfiguration?.unlokApiKey} onProceed={handleProceedPastConnect} />
+			</ChatLayout>
+		)
+	}
+
+	if (chatState.planModeSelected && planState) {
+		return (
+			<ChatLayout isHidden={isHidden}>
+				<div className="flex flex-col flex-1 overflow-hidden">
+					{showNavbar && <Navbar />}
+					<PlanView state={planState} />
+				</div>
+				<footer className="bg-(--vscode-sidebar-background) flex flex-col" style={{ gridRow: "2" }}>
+					<InputSection
+						canStop={buttonConfig.stoppable === true}
+						chatState={chatState}
+						lastTurnRoutingNote={lastTurnRoutingNote}
+						messageHandlers={messageHandlers}
+						onStop={messageHandlers.handleTaskCloseButtonClick}
+						placeholderText={placeholderText}
+						scrollBehavior={scrollBehavior}
+						selectFilesAndImages={selectFilesAndImages}
+						shouldDisableFilesAndImages={shouldDisableFilesAndImages}
+					/>
+				</footer>
+			</ChatLayout>
+		)
+	}
 
 	return (
 		<ChatLayout isHidden={isHidden}>
@@ -413,18 +525,32 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 				)}
 			</div>
 			<footer className="bg-(--vscode-sidebar-background) flex flex-col" style={{ gridRow: "2" }}>
-				<AutoApproveBar />
+				{task && (
+					<CostContextStrip
+						cacheReads={apiMetrics.totalCacheReads}
+						cacheWrites={apiMetrics.totalCacheWrites}
+						contextWindow={selectedModelInfo.contextWindow}
+						lastApiReqTotalTokens={lastApiReqTotalTokens}
+						onSendMessage={messageHandlers.handleSendMessage}
+						tokensIn={apiMetrics.totalTokensIn}
+						tokensOut={apiMetrics.totalTokensOut}
+						totalCost={apiMetrics.totalCost}
+					/>
+				)}
 				<ActionButtons
+					buttonConfig={buttonConfig}
 					chatState={chatState}
 					messageHandlers={messageHandlers}
 					messages={messages}
-					mode={mode}
 					task={task}
 				/>
 				<QueuedPrompts items={queuedPrompts} />
 				<InputSection
+					canStop={buttonConfig.stoppable === true}
 					chatState={chatState}
+					lastTurnRoutingNote={lastTurnRoutingNote}
 					messageHandlers={messageHandlers}
+					onStop={handleStop}
 					placeholderText={placeholderText}
 					scrollBehavior={scrollBehavior}
 					selectFilesAndImages={selectFilesAndImages}

@@ -750,6 +750,7 @@ message ModelsApiConfiguration {
   optional string minimax_api_line = 79;
   optional string hicap_model_id = 80;
   optional string hicap_api_key = 81;
+  optional string unlok_api_key = 244;
   optional string aihubmix_api_key = 82;
   optional string aihubmix_base_url = 83;
   optional string aihubmix_app_code = 84;
@@ -794,6 +795,8 @@ message ModelsApiConfiguration {
   optional string plan_mode_oca_reasoning_effort = 133;
   optional string plan_mode_hicap_model_id = 134;
   optional OpenRouterModelInfo plan_mode_hicap_model_info = 135;
+  optional string plan_mode_unlok_model_id = 245;
+  optional OpenRouterModelInfo plan_mode_unlok_model_info = 246;
   optional string plan_mode_aihubmix_model_id = 136;
   optional OpenAiCompatibleModelInfo plan_mode_aihubmix_model_info = 137;
   optional string plan_mode_nous_research_model_id = 138;
@@ -840,6 +843,8 @@ message ModelsApiConfiguration {
   optional string act_mode_oca_reasoning_effort = 233;
   optional string act_mode_hicap_model_id = 234;
   optional OpenRouterModelInfo act_mode_hicap_model_info = 235;
+  optional string act_mode_unlok_model_id = 247;
+  optional OpenRouterModelInfo act_mode_unlok_model_info = 248;
   optional string act_mode_aihubmix_model_id = 236;
   optional OpenAiCompatibleModelInfo act_mode_aihubmix_model_info = 237;
   optional string act_mode_nous_research_model_id = 238;

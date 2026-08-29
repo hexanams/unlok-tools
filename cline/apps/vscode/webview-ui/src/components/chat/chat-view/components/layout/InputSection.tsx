@@ -11,6 +11,11 @@ interface InputSectionProps {
 	placeholderText: string
 	shouldDisableFilesAndImages: boolean
 	selectFilesAndImages: () => Promise<void>
+	/** Whether the current turn can be stopped (see ChatView's buttonConfig.stoppable). */
+	canStop: boolean
+	onStop: () => void
+	/** What Unlok actually picked for the last completed turn, if anything -- see ChatView. */
+	lastTurnRoutingNote: string | undefined
 }
 
 /**
@@ -23,6 +28,9 @@ export const InputSection: React.FC<InputSectionProps> = ({
 	placeholderText,
 	shouldDisableFilesAndImages,
 	selectFilesAndImages,
+	canStop,
+	onStop,
+	lastTurnRoutingNote,
 }) => {
 	const {
 		activeQuote,
@@ -38,6 +46,10 @@ export const InputSection: React.FC<InputSectionProps> = ({
 		textAreaRef,
 		handleFocusChange,
 		lastMessage,
+		planModeSelected,
+		setPlanModeSelected,
+		planRoutingPolicy,
+		setPlanRoutingPolicy,
 	} = chatState
 
 	const { isAtBottom, scrollToBottomAuto } = scrollBehavior
@@ -62,7 +74,9 @@ export const InputSection: React.FC<InputSectionProps> = ({
 
 			<ChatTextArea
 				activeQuote={activeQuote}
+				canStop={canStop}
 				inputValue={inputValue}
+				lastTurnRoutingNote={lastTurnRoutingNote}
 				onFocusChange={handleFocusChange}
 				onHeightChange={() => {
 					if (isAtBottom) {
@@ -71,12 +85,17 @@ export const InputSection: React.FC<InputSectionProps> = ({
 				}}
 				onSelectFilesAndImages={selectFilesAndImages}
 				onSend={() => messageHandlers.handleSendMessage(inputValue, selectedImages, selectedFiles)}
+				onStop={onStop}
 				placeholderText={placeholderText}
+				planModeSelected={planModeSelected}
+				planRoutingPolicy={planRoutingPolicy}
 				ref={textAreaRef}
 				selectedFiles={selectedFiles}
 				selectedImages={selectedImages}
 				sendingDisabled={submitDisabled}
 				setInputValue={setInputValue}
+				setPlanModeSelected={setPlanModeSelected}
+				setPlanRoutingPolicy={setPlanRoutingPolicy}
 				setSelectedFiles={setSelectedFiles}
 				setSelectedImages={setSelectedImages}
 				shouldDisableFilesAndImages={shouldDisableFilesAndImages}

@@ -22,6 +22,8 @@ export function useChatState(messages: ClineMessage[]): ChatState {
 	const [expandedRows, setExpandedRows] = useState<Record<number, boolean>>({})
 	const [pendingUserMessage, setPendingUserMessage] = useState<PendingUserMessage | undefined>(undefined)
 	const [pendingResponse, setPendingResponse] = useState<PendingResponse | undefined>(undefined)
+	const [planModeSelected, setPlanModeSelected] = useState(false)
+	const [planRoutingPolicy, setPlanRoutingPolicy] = useState("balanced")
 
 	// Refs
 	const textAreaRef = useRef<HTMLTextAreaElement>(null)
@@ -53,7 +55,7 @@ export function useChatState(messages: ClineMessage[]): ChatState {
 	// Auto-expand last message row when task or messages first changed.
 	useEffect(() => {
 		clearExpandedRows()
-	}, [task?.ts, clearExpandedRows])
+	}, [clearExpandedRows])
 
 	return {
 		// State values
@@ -81,6 +83,10 @@ export function useChatState(messages: ClineMessage[]): ChatState {
 		setPendingUserMessage,
 		pendingResponse,
 		setPendingResponse,
+		planModeSelected,
+		setPlanModeSelected,
+		planRoutingPolicy,
+		setPlanRoutingPolicy,
 
 		// Refs
 		textAreaRef,

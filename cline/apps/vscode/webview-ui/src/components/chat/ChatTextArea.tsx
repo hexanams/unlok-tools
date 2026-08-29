@@ -1,24 +1,28 @@
+import { AUTO_MODE_ACTIONS, MANUAL_MODE_ACTIONS } from "@shared/AutoApprovalSettings"
 import { mentionRegex, mentionRegexGlobal } from "@shared/context-mentions"
 import { StringRequest } from "@shared/proto/cline/common"
 import { FileSearchRequest, FileSearchType, RelativePathsRequest } from "@shared/proto/cline/file"
 import { PlanActMode, TogglePlanActModeRequest } from "@shared/proto/cline/state"
 import { type SlashCommand } from "@shared/slashCommands"
-import { Mode } from "@shared/storage/types"
 import { VSCodeButton } from "@vscode/webview-ui-toolkit/react"
-import { AtSignIcon, PlusIcon } from "lucide-react"
+import { Check, HistoryIcon, MousePointerClick, Route, Settings2Icon, Zap } from "lucide-react"
 import type React from "react"
 import { forwardRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import DynamicTextArea from "react-textarea-autosize"
 import styled from "styled-components"
+import { updateAutoApproveSettings } from "@/components/chat/auto-approve-menu/AutoApproveSettingsAPI"
 import ContextMenu from "@/components/chat/ContextMenu"
 import { CHAT_CONSTANTS } from "@/components/chat/chat-view/constants"
 import SlashCommandMenu from "@/components/chat/SlashCommandMenu"
 import Thumbnails from "@/components/common/Thumbnails"
+import { PlanRoutingPolicyDropdown } from "@/components/plan/PlanRoutingPolicyDropdown"
 import { getModeSpecificFields } from "@/components/settings/utils/providerUtils"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { usePlatform } from "@/context/PlatformContext"
 import { useNormalizedApiConfiguration } from "@/hooks/useNormalizedApiConfiguration"
+import { useProviderConfig } from "@/hooks/useProviderConfig"
 import { cn } from "@/lib/utils"
 import { FileServiceClient, StateServiceClient } from "@/services/grpc-client"
 import {
@@ -42,9 +46,14 @@ import {
 	slashCommandRegexGlobal,
 	validateSlashCommand,
 } from "@/utils/slash-commands"
-import ClineRulesToggleModal from "../cline-rules/ClineRulesToggleModal"
-import { getModeToggleDraftAction } from "./chat-textarea-mode-toggle"
-import ServersToggleModal from "./ServersToggleModal"
+import { AddMenuPopover } from "./AddMenuPopover"
+import {
+	type ChatModeOption,
+	getActiveChatModeOption,
+	getModeToggleDraftAction,
+	getNextChatModeOption,
+} from "./chat-textarea-mode-toggle"
+import { ModelPickerPopover } from "./ModelPickerPopover"
 
 const { MAX_IMAGES_AND_FILES_PER_MESSAGE } = CHAT_CONSTANTS
 
@@ -80,10 +89,20 @@ interface ChatTextAreaProps {
 	setSelectedImages: React.Dispatch<React.SetStateAction<string[]>>
 	setSelectedFiles: React.Dispatch<React.SetStateAction<string[]>>
 	onSend: () => void
+	/** Stops the current turn -- shown beside Send whenever canStop is true. */
+	onStop: () => void
+	canStop: boolean
+	/** What Unlok actually picked for the last completed turn, if anything -- see ChatView. */
+	lastTurnRoutingNote: string | undefined
 	onSelectFilesAndImages: () => void
 	shouldDisableFilesAndImages: boolean
 	onHeightChange?: (height: number) => void
 	onFocusChange?: (isFocused: boolean) => void
+	/** Whether the composer's Plan pill is selected -- see ChatState.planModeSelected. */
+	planModeSelected: boolean
+	setPlanModeSelected: React.Dispatch<React.SetStateAction<boolean>>
+	planRoutingPolicy: string
+	setPlanRoutingPolicy: React.Dispatch<React.SetStateAction<string>>
 }
 
 interface GitCommit {
@@ -93,34 +112,21 @@ interface GitCommit {
 	description: string
 }
 
-const PLAN_MODE_COLOR = "var(--vscode-activityWarningBadge-background)"
-const ACT_MODE_COLOR = "var(--vscode-focusBorder)"
-
-const SwitchContainer = styled.div<{ disabled: boolean }>`
-	display: flex;
-	align-items: center;
-	background-color: transparent;
-	border: 1px solid var(--vscode-input-border);
-	border-radius: 12px;
-	overflow: hidden;
-	cursor: ${(props) => (props.disabled ? "not-allowed" : "pointer")};
-	opacity: ${(props) => (props.disabled ? 0.5 : 1)};
-	transform: scale(1);
-	transform-origin: right center;
-	margin-left: 0;
-	user-select: none; // Prevent text selection
-`
-
-const Slider = styled.div.withConfig({
-	shouldForwardProp: (prop) => !["isAct", "isPlan"].includes(prop),
-})<{ isAct: boolean; isPlan?: boolean }>`
-	position: absolute;
-	height: 100%;
-	width: 50%;
-	background-color: ${(props) => (props.isPlan ? PLAN_MODE_COLOR : ACT_MODE_COLOR)};
-	transition: transform 0.2s ease;
-	transform: translateX(${(props) => (props.isAct ? "100%" : "0%")});
-`
+// Ochre means "active/selected" everywhere else in this UI (sign-in button,
+// badges, connection dot); the composer's own focus outline uses it too,
+// regardless of mode (see the outline style further down).
+const ACTIVE_COMPOSER_COLOR = "var(--color-cline)"
+const CHAT_MODE_OPTION_LABELS: Record<ChatModeOption, string> = { plan: "Plan", auto: "Auto", manual: "Manual" }
+const CHAT_MODE_OPTION_DESCRIPTIONS: Record<ChatModeOption, string> = {
+	plan: "break the task into priced steps, then run them with your approval",
+	auto: "complete the task immediately, auto-approving most actions (risky commands still ask)",
+	manual: "complete the task immediately, asking before every action",
+}
+const CHAT_MODE_OPTION_ICONS: Record<ChatModeOption, React.ComponentType<{ className?: string }>> = {
+	plan: Route,
+	auto: Zap,
+	manual: MousePointerClick,
+}
 
 const ButtonGroup = styled.div`
 	display: flex;
@@ -153,48 +159,6 @@ const ModelButtonWrapper = styled.div`
 	max-width: 100%; // Don't overflow parent
 `
 
-const ModelDisplayButton = styled.a<{ isActive?: boolean; disabled?: boolean }>`
-	padding: 0px 0px;
-	height: 20px;
-	width: 100%;
-	min-width: 0;
-	cursor: ${(props) => (props.disabled ? "not-allowed" : "pointer")};
-	text-decoration: ${(props) => (props.isActive ? "underline" : "none")};
-	color: ${(props) => (props.isActive ? "var(--vscode-foreground)" : "var(--vscode-descriptionForeground)")};
-	display: flex;
-	align-items: center;
-	font-size: 10px;
-	outline: none;
-	user-select: none;
-	opacity: ${(props) => (props.disabled ? 0.5 : 1)};
-	pointer-events: ${(props) => (props.disabled ? "none" : "auto")};
-
-	&:hover,
-	&:focus {
-		color: ${(props) => (props.disabled ? "var(--vscode-descriptionForeground)" : "var(--vscode-foreground)")};
-		text-decoration: ${(props) => (props.disabled ? "none" : "underline")};
-		outline: none;
-	}
-
-	&:active {
-		color: ${(props) => (props.disabled ? "var(--vscode-descriptionForeground)" : "var(--vscode-foreground)")};
-		text-decoration: ${(props) => (props.disabled ? "none" : "underline")};
-		outline: none;
-	}
-
-	&:focus-visible {
-		outline: none;
-	}
-`
-
-const ModelButtonContent = styled.div`
-	width: 100%;
-	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-`
-
 const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 	(
 		{
@@ -207,10 +171,17 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			setSelectedImages,
 			setSelectedFiles,
 			onSend,
+			onStop,
+			canStop,
+			lastTurnRoutingNote,
 			onSelectFilesAndImages,
 			shouldDisableFilesAndImages,
 			onHeightChange,
 			onFocusChange,
+			planModeSelected,
+			setPlanModeSelected,
+			planRoutingPolicy,
+			setPlanRoutingPolicy,
 		},
 		ref,
 	) => {
@@ -223,8 +194,11 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			globalWorkflowToggles,
 			remoteWorkflowToggles,
 			remoteConfigSettings,
-			navigateToSettingsModelPicker,
+			navigateToHistory,
+			navigateToAccount,
+			navigateToSettings,
 			mcpServers,
+			autoApprovalSettings,
 		} = useExtensionState()
 		const [isTextAreaFocused, setIsTextAreaFocused] = useState(false)
 		const [isDraggingOver, setIsDraggingOver] = useState(false)
@@ -249,18 +223,19 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		const [intendedCursorPosition, setIntendedCursorPosition] = useState<number | null>(null)
 		const contextMenuContainerRef = useRef<HTMLDivElement>(null)
 
-		const [shownTooltipMode, setShownTooltipMode] = useState<Mode | null>(null)
 		const [pendingInsertions, setPendingInsertions] = useState<string[]>([])
 		const _shiftHoldTimerRef = useRef<NodeJS.Timeout | null>(null)
 		const [showUnsupportedFileError, setShowUnsupportedFileError] = useState(false)
 		const unsupportedFileTimerRef = useRef<NodeJS.Timeout | null>(null)
 		const [showDimensionError, setShowDimensionError] = useState(false)
 		const dimensionErrorTimerRef = useRef<NodeJS.Timeout | null>(null)
+		const [modeMenuOpen, setModeMenuOpen] = useState(false)
 
 		const [fileSearchResults, setFileSearchResults] = useState<SearchResult[]>([])
 		const [searchLoading, setSearchLoading] = useState(false)
-		const [, metaKeyChar] = useMetaKeyDetection(platform)
+		const [, _metaKeyChar] = useMetaKeyDetection(platform)
 		const { selectedProvider, selectedModelId } = useNormalizedApiConfiguration(mode)
+		const { commitSelection: commitUnlokModelSelection } = useProviderConfig("unlok")
 
 		// Fetch git commits when Git is selected or when typing a hash
 		useEffect(() => {
@@ -307,7 +282,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			return () => {
 				document.removeEventListener("mousedown", handleClickOutside)
 			}
-		}, [showContextMenu, setShowContextMenu])
+		}, [showContextMenu])
 
 		useEffect(() => {
 			const handleClickOutsideSlashMenu = (event: MouseEvent) => {
@@ -608,7 +583,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 					// Check if we're right after a space that follows a mention or slash command
 					if (
 						charBeforeIsWhitespace &&
-						inputValue.slice(0, cursorPosition - 1).match(new RegExp(mentionRegex.source + "$"))
+						inputValue.slice(0, cursorPosition - 1).match(new RegExp(`${mentionRegex.source}$`))
 					) {
 						// File mention handling
 						const newCursorPosition = cursorPosition - 1
@@ -678,6 +653,12 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				slashCommandsQuery,
 				handleSlashCommandsSelect,
 				sendingDisabled,
+				globalWorkflowToggles,
+				justDeletedSpaceAfterSlashCommand,
+				localWorkflowToggles,
+				mcpServers,
+				remoteConfigSettings?.remoteGlobalWorkflows,
+				remoteWorkflowToggles,
 			],
 		)
 
@@ -687,7 +668,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				textAreaRef.current.setSelectionRange(intendedCursorPosition, intendedCursorPosition)
 				setIntendedCursorPosition(null) // Reset the state after applying
 			}
-		}, [inputValue, intendedCursorPosition])
+		}, [intendedCursorPosition])
 
 		useEffect(() => {
 			if (pendingInsertions.length === 0 || !textAreaRef.current) {
@@ -709,7 +690,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			setIntendedCursorPosition(newCursorPosition)
 
 			setPendingInsertions((prev) => prev.slice(1))
-		}, [pendingInsertions, setInputValue])
+		}, [pendingInsertions, setInputValue, intendedCursorPosition])
 
 		const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
@@ -818,7 +799,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 					setFileSearchResults([])
 				}
 			},
-			[setInputValue, setFileSearchResults, selectedType],
+			[setInputValue, selectedType],
 		)
 
 		useEffect(() => {
@@ -858,7 +839,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				if (urlRegex.test(pastedText.trim())) {
 					e.preventDefault()
 					const trimmedUrl = pastedText.trim()
-					const newValue = inputValue.slice(0, cursorPosition) + trimmedUrl + " " + inputValue.slice(cursorPosition)
+					const newValue = `${inputValue.slice(0, cursorPosition) + trimmedUrl} ${inputValue.slice(cursorPosition)}`
 					setInputValue(newValue)
 					const newCursorPosition = cursorPosition + trimmedUrl.length + 1
 					setCursorPosition(newCursorPosition)
@@ -1006,7 +987,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 
 		useLayoutEffect(() => {
 			updateHighlights()
-		}, [inputValue, updateHighlights])
+		}, [updateHighlights])
 
 		const updateCursorPosition = useCallback(() => {
 			if (textAreaRef.current) {
@@ -1023,62 +1004,119 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			[updateCursorPosition],
 		)
 
-		const onModeToggle = useCallback(() => {
-			void (async () => {
-				const convertedProtoMode = mode === "plan" ? PlanActMode.ACT : PlanActMode.PLAN
-				const submittedText = inputValue
-				const submittedImages = selectedImages
-				const submittedFiles = selectedFiles
-				const response = await StateServiceClient.togglePlanActModeProto(
-					TogglePlanActModeRequest.create({
-						mode: convertedProtoMode,
-						chatContent: {
-							message: submittedText.trim() ? submittedText : undefined,
-							images: submittedImages,
-							files: submittedFiles,
-						},
-					}),
-				)
-				// Focus the textarea after mode toggle with slight delay
-				setTimeout(() => {
-					const consumedComposerContent = response.value === true
-					const currentText = textAreaRef.current?.value ?? ""
-					// Reconcile only the submitted draft: the rebuild can take a moment
-					// and the user may have typed new content in the meantime.
-					const draftAction = getModeToggleDraftAction({
-						consumed: consumedComposerContent,
-						currentText,
-						submittedText,
+		// Plan is tracked as local UI selection (planModeSelected), not derived
+		// from the SDK's Mode -- the step-plan feature always runs on top of
+		// "act" (see setChatMode below and plan-coordinator.ts), so Mode alone
+		// can no longer distinguish Plan from Auto/Manual the way it used to.
+		const activeChatMode: ChatModeOption = useMemo(
+			() =>
+				planModeSelected
+					? "plan"
+					: getActiveChatModeOption(mode, autoApprovalSettings.actions, AUTO_MODE_ACTIONS, MANUAL_MODE_ACTIONS),
+			[planModeSelected, mode, autoApprovalSettings.actions],
+		)
+
+		const setChatMode = useCallback(
+			(target: ChatModeOption) => {
+				setPlanModeSelected(target === "plan")
+
+				void (async () => {
+					// Plan/Auto/Manual are all "act" underneath now -- the classic
+					// SDK "plan" (discuss-before-acting) mode is no longer reachable
+					// from this control at all (see setChatMode's doc comment in
+					// chat-textarea-mode-toggle.ts). Selecting Plan doesn't call the
+					// Plan/Act RPC; ChatView triggers plan generation on submit
+					// instead, once planModeSelected is true.
+					const targetUnderlyingMode = "act"
+					const submittedText = inputValue
+					const submittedImages = selectedImages
+					const submittedFiles = selectedFiles
+
+					// Only hit the Plan/Act RPC (which submits any queued draft)
+					// when the underlying mode is actually changing, not on every
+					// click within Plan/Auto/Manual (all "act" now).
+					if (targetUnderlyingMode !== mode) {
+						const response = await StateServiceClient.togglePlanActModeProto(
+							TogglePlanActModeRequest.create({
+								mode: targetUnderlyingMode === "act" ? PlanActMode.ACT : PlanActMode.PLAN,
+								chatContent: {
+									message: submittedText.trim() ? submittedText : undefined,
+									images: submittedImages,
+									files: submittedFiles,
+								},
+							}),
+						)
+						// Focus the textarea after mode toggle with slight delay
+						setTimeout(() => {
+							const consumedComposerContent = response.value === true
+							const currentText = textAreaRef.current?.value ?? ""
+							// Reconcile only the submitted draft: the rebuild can take a
+							// moment and the user may have typed new content meanwhile.
+							const draftAction = getModeToggleDraftAction({
+								consumed: consumedComposerContent,
+								currentText,
+								submittedText,
+							})
+
+							switch (draftAction) {
+								case "clear":
+									setInputValue("")
+									break
+								case "restore":
+									setInputValue(submittedText)
+									break
+								case "keep":
+									break
+							}
+
+							if (consumedComposerContent) {
+								setSelectedImages((current) => (current === submittedImages ? [] : current))
+								setSelectedFiles((current) => (current === submittedFiles ? [] : current))
+							} else {
+								if (submittedImages.length > 0) {
+									setSelectedImages((current) => (current.length === 0 ? submittedImages : current))
+								}
+								if (submittedFiles.length > 0) {
+									setSelectedFiles((current) => (current.length === 0 ? submittedFiles : current))
+								}
+							}
+							textAreaRef.current?.focus()
+						}, 100)
+					}
+
+					// PLAN_MODE_ACTIONS (read/browse only, no edits or commands) was
+					// built for the old discuss-before-acting Plan mode and is wrong
+					// here: a step frequently needs to edit files and run commands,
+					// and the approval gate for that is now the step itself (Run
+					// remaining/Step through), not a per-tool-call ask -- see
+					// plan-coordinator.ts's runSteps. Plan uses the same full-auto
+					// preset as Auto.
+					const preset = target === "manual" ? MANUAL_MODE_ACTIONS : AUTO_MODE_ACTIONS
+					await updateAutoApproveSettings({
+						...autoApprovalSettings,
+						version: (autoApprovalSettings.version ?? 1) + 1,
+						actions: preset,
 					})
+				})()
+			},
+			[
+				mode,
+				inputValue,
+				selectedImages,
+				selectedFiles,
+				setInputValue,
+				setSelectedImages,
+				setSelectedFiles,
+				autoApprovalSettings,
+				setPlanModeSelected,
+			],
+		)
 
-					switch (draftAction) {
-						case "clear":
-							setInputValue("")
-							break
-						case "restore":
-							setInputValue(submittedText)
-							break
-						case "keep":
-							break
-					}
+		const cycleChatMode = useCallback(() => {
+			setChatMode(getNextChatModeOption(activeChatMode))
+		}, [setChatMode, activeChatMode])
 
-					if (consumedComposerContent) {
-						setSelectedImages((current) => (current === submittedImages ? [] : current))
-						setSelectedFiles((current) => (current === submittedFiles ? [] : current))
-					} else {
-						if (submittedImages.length > 0) {
-							setSelectedImages((current) => (current.length === 0 ? submittedImages : current))
-						}
-						if (submittedFiles.length > 0) {
-							setSelectedFiles((current) => (current.length === 0 ? submittedFiles : current))
-						}
-					}
-					textAreaRef.current?.focus()
-				}, 100)
-			})()
-		}, [mode, inputValue, selectedImages, selectedFiles, setInputValue, setSelectedImages, setSelectedFiles])
-
-		useShortcut(usePlatform().togglePlanActKeys, onModeToggle, { disableTextInputs: false }) // important that we don't disable the text input here
+		useShortcut(usePlatform().togglePlanActKeys, cycleChatMode, { disableTextInputs: false }) // important that we don't disable the text input here
 
 		const handleContextButtonClick = useCallback(() => {
 			// Focus the textarea first
@@ -1101,7 +1139,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			if (inputValue.endsWith(" ")) {
 				const event = {
 					target: {
-						value: inputValue + "@",
+						value: `${inputValue}@`,
 						selectionStart: inputValue.length + 1,
 					},
 				} as React.ChangeEvent<HTMLTextAreaElement>
@@ -1113,7 +1151,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			// Otherwise add space then @
 			const event = {
 				target: {
-					value: inputValue + " @",
+					value: `${inputValue} @`,
 					selectionStart: inputValue.length + 2,
 				},
 			} as React.ChangeEvent<HTMLTextAreaElement>
@@ -1121,9 +1159,14 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			updateHighlights()
 		}, [inputValue, handleInputChange, updateHighlights])
 
-		const handleModelButtonClick = () => {
-			navigateToSettingsModelPicker({ targetSection: "api-config" })
-		}
+		const handleModelSelect = useCallback(
+			(modelId: string) => {
+				void commitUnlokModelSelection(mode, { providerId: "unlok", modelId }).catch((err) =>
+					console.error("Failed to commit Unlok model selection:", err),
+				)
+			},
+			[commitUnlokModelSelection, mode],
+		)
 
 		// Get model display name
 		const modelDisplayName = useMemo(() => {
@@ -1166,8 +1209,6 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 					return `${selectedProvider}:${requestyModelId}`
 				case "vercel-ai-gateway":
 					return `${selectedProvider}:${vercelAiGatewayModelId || selectedModelId}`
-				case "anthropic":
-				case "openrouter":
 				default:
 					return `${selectedProvider}:${selectedModelId}`
 			}
@@ -1401,11 +1442,6 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				),
 			)
 		}
-		// Replace Meta with the platform specific key and uppercase the command letter.
-		const togglePlanActKeys = usePlatform()
-			.togglePlanActKeys.replace("Meta", metaKeyChar)
-			.replace(/.$/, (match) => match.toUpperCase())
-
 		return (
 			<div>
 				<div
@@ -1458,7 +1494,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 					)}
 					<div
 						className={cn(
-							"absolute bottom-2.5 top-2.5 whitespace-pre-wrap break-words rounded-xs overflow-hidden bg-input-background",
+							"absolute bottom-2.5 top-2.5 whitespace-pre-wrap break-words rounded-lg overflow-hidden bg-input-background",
 							isTextAreaFocused ? "left-3.5 right-3.5" : "left-3.5 right-3.5 border border-input-border",
 						)}
 						ref={highlightLayerRef}
@@ -1472,7 +1508,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							fontFamily: "var(--vscode-font-family)",
 							fontSize: "var(--vscode-editor-font-size)",
 							lineHeight: "var(--vscode-editor-line-height)",
-							borderRadius: 2,
+							borderRadius: 10,
 							borderLeft: isTextAreaFocused ? 0 : undefined,
 							borderRight: isTextAreaFocused ? 0 : undefined,
 							borderTop: isTextAreaFocused ? 0 : undefined,
@@ -1484,7 +1520,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						autoFocus={true}
 						data-testid="chat-input"
 						maxRows={10}
-						minRows={3}
+						minRows={6}
 						onBlur={handleBlur}
 						onChange={(e) => {
 							handleInputChange(e)
@@ -1521,7 +1557,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							backgroundColor: "transparent",
 							color: "var(--vscode-input-foreground)",
 							//border: "1px solid var(--vscode-input-border)",
-							borderRadius: 2,
+							borderRadius: 10,
 							fontFamily: "var(--vscode-font-family)",
 							fontSize: "var(--vscode-editor-font-size)",
 							lineHeight: "var(--vscode-editor-line-height)",
@@ -1548,7 +1584,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 								isDraggingOver && !showUnsupportedFileError // Only show drag outline if not showing error
 									? "2px dashed var(--vscode-focusBorder)"
 									: isTextAreaFocused
-										? `1px solid ${mode === "plan" ? PLAN_MODE_COLOR : "var(--vscode-focusBorder)"}`
+										? `1px solid ${ACTIVE_COMPOSER_COLOR}`
 										: "none",
 							outlineOffset: isDraggingOver && !showUnsupportedFileError ? "1px" : "0px", // Add offset for drag-over outline
 						}}
@@ -1579,9 +1615,22 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 					<div
 						className="absolute flex items-end bottom-4.5 right-5 z-10 h-8 text-xs"
 						style={{ height: textAreaBaseHeight }}>
-						<div className="flex flex-row items-center">
+						<div className="flex flex-row items-center gap-2">
+							{canStop && (
+								<div
+									aria-label="Stop"
+									className="input-icon-button text-cline codicon codicon-debug-stop text-sm"
+									data-testid="stop-button"
+									onClick={onStop}
+									role="button"
+								/>
+							)}
 							<div
-								className={cn("input-icon-button", { disabled: sendingDisabled }, "codicon codicon-send text-sm")}
+								className={cn(
+									"input-icon-button",
+									{ disabled: sendingDisabled, "text-cline": !sendingDisabled },
+									"codicon codicon-send text-sm",
+								)}
 								data-testid="send-button"
 								onClick={() => {
 									if (!sendingDisabled) {
@@ -1592,98 +1641,128 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						</div>
 					</div>
 				</div>
-				<div className="flex justify-between items-center -mt-[2px] px-3 pb-2">
+				<div className="flex justify-between items-center mt-2 px-3 pb-2">
 					{/* Always render both components, but control visibility with CSS */}
 					<div className="relative flex-1 min-w-0 h-5">
 						{/* ButtonGroup - always in DOM but visibility controlled */}
 						<ButtonGroup className="absolute top-0 left-0 right-0 ease-in-out w-full h-5 z-10 flex items-center">
+							<AddMenuPopover
+								onAddContext={handleContextButtonClick}
+								onSelectFilesAndImages={onSelectFilesAndImages}
+								shouldDisableFilesAndImages={shouldDisableFilesAndImages}
+							/>
+
 							<Tooltip>
-								<TooltipContent>Add Context</TooltipContent>
+								<TooltipContent>History</TooltipContent>
 								<TooltipTrigger>
 									<VSCodeButton
 										appearance="icon"
-										aria-label="Add Context"
+										aria-label="History"
 										className="p-0 m-0 flex items-center"
-										data-testid="context-button"
-										onClick={handleContextButtonClick}>
+										data-testid="history-button"
+										onClick={navigateToHistory}>
 										<ButtonContainer>
-											<AtSignIcon size={12} />
+											<HistoryIcon size={12} />
 										</ButtonContainer>
 									</VSCodeButton>
 								</TooltipTrigger>
 							</Tooltip>
 
 							<Tooltip>
-								<TooltipContent>Add Files & Images</TooltipContent>
+								<TooltipContent>Settings</TooltipContent>
 								<TooltipTrigger>
 									<VSCodeButton
 										appearance="icon"
-										aria-label="Add Files & Images"
+										aria-label="Settings"
 										className="p-0 m-0 flex items-center"
-										data-testid="files-button"
-										disabled={shouldDisableFilesAndImages}
-										onClick={() => {
-											if (!shouldDisableFilesAndImages) {
-												onSelectFilesAndImages()
-											}
-										}}>
+										data-testid="settings-button"
+										onClick={() => navigateToSettings()}>
 										<ButtonContainer>
-											<PlusIcon size={13} />
+											<Settings2Icon size={12} />
 										</ButtonContainer>
 									</VSCodeButton>
 								</TooltipTrigger>
 							</Tooltip>
-
-							<ServersToggleModal />
-
-							<ClineRulesToggleModal />
 
 							<ModelContainer>
 								<ModelButtonWrapper>
-									<ModelDisplayButton
-										disabled={false}
-										onClick={handleModelButtonClick}
-										role="button"
-										tabIndex={0}
-										title="Open API Settings">
-										<ModelButtonContent className="text-xs">{modelDisplayName}</ModelButtonContent>
-									</ModelDisplayButton>
+									<ModelPickerPopover
+										currentModelId={
+											(mode === "plan"
+												? apiConfiguration?.planModeUnlokModelId
+												: apiConfiguration?.actModeUnlokModelId) || "auto"
+										}
+										onSelect={handleModelSelect}
+										triggerLabel={modelDisplayName}
+									/>
 								</ModelButtonWrapper>
 							</ModelContainer>
 						</ButtonGroup>
 					</div>
-					{/* Tooltip for Plan/Act toggle remains outside the conditional rendering */}
-					<Tooltip>
-						<TooltipContent
-							className="text-xs px-2 flex flex-col gap-1"
-							hidden={shownTooltipMode === null}
-							side="top">
-							{`In ${shownTooltipMode === "act" ? "Act" : "Plan"}  mode, Cline will ${shownTooltipMode === "act" ? "complete the task immediately" : "gather information to architect a plan"}`}
-							<p className="text-description/80 text-xs mb-0">
-								Toggle w/ <kbd className="text-muted-foreground mx-1">{togglePlanActKeys}</kbd>
-							</p>
-						</TooltipContent>
-						<TooltipTrigger>
-							<SwitchContainer data-testid="mode-switch" disabled={false} onClick={onModeToggle}>
-								<Slider isAct={mode === "act"} isPlan={mode === "plan"} />
-								{["Plan", "Act"].map((m) => (
-									<div
-										aria-checked={mode === m.toLowerCase()}
+					{activeChatMode === "plan" && (
+						<PlanRoutingPolicyDropdown onChange={setPlanRoutingPolicy} value={planRoutingPolicy} />
+					)}
+					{/* Plan/Auto/Manual: a compact popover -- the trigger stays a small pill
+					so it never crowds the composer row, and the footer note below still
+					carries the full explanation, so the menu itself stays terse. */}
+					<Popover onOpenChange={setModeMenuOpen} open={modeMenuOpen}>
+						<PopoverTrigger asChild>
+							<button
+								className="flex h-6 shrink-0 items-center gap-1.5 rounded-full border border-input-border bg-input-background/40 px-2.5 text-xs font-medium text-input-foreground cursor-pointer hover:bg-input-background/70"
+								data-testid="mode-switch"
+								type="button">
+								{(() => {
+									const ActiveIcon = CHAT_MODE_OPTION_ICONS[activeChatMode]
+									return <ActiveIcon className="size-3" />
+								})()}
+								{CHAT_MODE_OPTION_LABELS[activeChatMode]}
+							</button>
+						</PopoverTrigger>
+						<PopoverContent align="end" className="w-64 p-1" showArrow={false} side="top">
+							<div className="px-2 pt-1 pb-1.5 text-xs font-semibold text-foreground">Modes</div>
+							{(["plan", "auto", "manual"] as const).map((option) => {
+								const Icon = CHAT_MODE_OPTION_ICONS[option]
+								const isActive = activeChatMode === option
+								return (
+									<button
 										className={cn(
-											"pt-0.5 pb-px px-2 z-10 text-xs w-1/2 text-center bg-transparent",
-											mode === m.toLowerCase() ? "text-white" : "text-input-foreground",
+											"flex w-full items-center gap-2.5 rounded-xs px-2 py-1.5 text-left cursor-pointer transition-colors",
+											isActive ? "bg-cline/10" : "hover:bg-input-background/60",
 										)}
-										key={m}
-										onMouseLeave={() => setShownTooltipMode(null)}
-										onMouseOver={() => setShownTooltipMode(m.toLowerCase() === "plan" ? "plan" : "act")}
-										role="switch">
-										{m}
-									</div>
-								))}
-							</SwitchContainer>
-						</TooltipTrigger>
-					</Tooltip>
+										key={option}
+										onClick={() => {
+											setChatMode(option)
+											setModeMenuOpen(false)
+										}}
+										type="button">
+										<span
+											className={cn(
+												"flex size-6 shrink-0 items-center justify-center rounded-full",
+												isActive
+													? "bg-cline text-badge-foreground"
+													: "bg-input-background text-description",
+											)}>
+											<Icon className="size-3.5" />
+										</span>
+										<div className="min-w-0 flex-1">
+											<div className="text-xs font-medium text-foreground">
+												{CHAT_MODE_OPTION_LABELS[option]}
+											</div>
+											<div className="text-[11px] leading-snug text-description/70">
+												{CHAT_MODE_OPTION_DESCRIPTIONS[option]}
+											</div>
+										</div>
+										{isActive && <Check className="size-3.5 shrink-0 text-cline" />}
+									</button>
+								)
+							})}
+						</PopoverContent>
+					</Popover>
 				</div>
+				<p className="text-description/80 text-xs px-3 pt-1.5 pb-0 m-0 select-none" data-testid="mode-footnote">
+					{lastTurnRoutingNote ??
+						`In ${CHAT_MODE_OPTION_LABELS[activeChatMode]} mode, I will ${CHAT_MODE_OPTION_DESCRIPTIONS[activeChatMode]}.`}
+				</p>
 			</div>
 		)
 	},

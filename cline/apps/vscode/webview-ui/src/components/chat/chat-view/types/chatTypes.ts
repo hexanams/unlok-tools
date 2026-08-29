@@ -49,6 +49,17 @@ export interface ChatState {
 	setPendingUserMessage: React.Dispatch<React.SetStateAction<PendingUserMessage | undefined>>
 	pendingResponse: PendingResponse | undefined
 	setPendingResponse: React.Dispatch<React.SetStateAction<PendingResponse | undefined>>
+	// Whether the composer's "Plan" pill is selected -- independent of the
+	// underlying SDK Mode (which stays "act" the whole time for the Unlok
+	// step-plan feature; see chat-textarea-mode-toggle.ts). Local-only, not
+	// synced from the extension host.
+	planModeSelected: boolean
+	setPlanModeSelected: React.Dispatch<React.SetStateAction<boolean>>
+	// Which routing policy generatePlan uses to shape tier assignment --
+	// local UI state, not a persisted account setting (see
+	// PlanRoutingPolicyDropdown.tsx for why).
+	planRoutingPolicy: string
+	setPlanRoutingPolicy: React.Dispatch<React.SetStateAction<string>>
 
 	// Refs
 	textAreaRef: React.RefObject<HTMLTextAreaElement>

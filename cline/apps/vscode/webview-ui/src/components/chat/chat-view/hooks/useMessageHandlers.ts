@@ -1,10 +1,11 @@
 import type { ClineMessage } from "@shared/ExtensionMessage"
 import { EmptyRequest, StringRequest } from "@shared/proto/cline/common"
+import { GeneratePlanRequest } from "@shared/proto/cline/plan"
 import { AskResponseRequest, NewTaskRequest } from "@shared/proto/cline/task"
 import { IntentEvent } from "@shared/proto/cline/ui"
 import { useCallback, useRef } from "react"
 import { useExtensionState } from "@/context/ExtensionStateContext"
-import { SlashServiceClient, TaskServiceClient, UiServiceClient } from "@/services/grpc-client"
+import { PlanServiceClient, SlashServiceClient, TaskServiceClient, UiServiceClient } from "@/services/grpc-client"
 import type { ButtonActionType } from "../shared/buttonConfig"
 import type { ChatState, MessageHandlers } from "../types/chatTypes"
 
@@ -12,8 +13,28 @@ import type { ChatState, MessageHandlers } from "../types/chatTypes"
  * Custom hook for managing message handlers
  * Handles sending messages, button clicks, and task management
  */
+/**
+ * Re-arms bottom-follow just long enough to reveal a freshly sent message or
+ * button action, then disables it again. Leaving auto-scroll permanently
+ * re-armed (the old behavior) kept dragging the view to the literal bottom on
+ * every row-height change for the whole reply, so a long answer scrolled its
+ * own start out of view before the user could read it. A brief window still
+ * shows what was just sent; after that the view holds still and the user
+ * reads top-down, only following again once they scroll to the bottom themselves.
+ */
+function reengageAutoScrollBriefly(chatState: ChatState) {
+	if (!("disableAutoScrollRef" in chatState)) {
+		return
+	}
+	const disableAutoScrollRef = (chatState as any).disableAutoScrollRef as React.MutableRefObject<boolean>
+	disableAutoScrollRef.current = false
+	setTimeout(() => {
+		disableAutoScrollRef.current = true
+	}, 250)
+}
+
 export function useMessageHandlers(messages: ClineMessage[], chatState: ChatState): MessageHandlers {
-	const { backgroundCommandRunning, turnState } = useExtensionState()
+	const { backgroundCommandRunning, turnState, navigateToChat } = useExtensionState()
 	const {
 		setInputValue,
 		activeQuote,
@@ -28,6 +49,8 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 		setPendingResponse,
 		clineAsk,
 		lastMessage,
+		planModeSelected,
+		planRoutingPolicy,
 	} = chatState
 	const cancelInFlightRef = useRef(false)
 	const pendingResponseIdRef = useRef(0)
@@ -44,6 +67,30 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 				const formattedQuote = activeQuote
 				const suffix = "\n[/context] \n\n"
 				messageToSend = `${prefix} ${formattedQuote} ${suffix} ${messageToSend}`
+			}
+
+			// `/clear` replaces the old navbar "+" button: close the current task
+			// (if any) and return to a blank chat, without sending anything to the model.
+			if (messageToSend === "/clear") {
+				setInputValue("")
+				setActiveQuote(null)
+				await TaskServiceClient.clearTask({}).catch((err) => console.error("Failed to clear task:", err))
+				navigateToChat()
+				return
+			}
+
+			// Plan pill selected -- decompose the goal into a priced, tiered step
+			// plan instead of sending it as a normal chat turn. Nothing about the
+			// goal reaches the model directly here; generatePlan does that on the
+			// backend. See ChatTextArea's setChatMode for why this branches on
+			// planModeSelected rather than the SDK's Mode.
+			if (planModeSelected && messageToSend) {
+				setInputValue("")
+				setActiveQuote(null)
+				await PlanServiceClient.generatePlan(
+					GeneratePlanRequest.create({ goal: messageToSend, routingPolicy: planRoutingPolicy }),
+				).catch((err) => console.error("Failed to generate plan:", err))
+				return
 			}
 
 			// Intercept the built-in compaction commands when an active task exists.
@@ -67,9 +114,7 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 				await SlashServiceClient.condense(StringRequest.create({ value: "compact" })).catch((err) =>
 					console.error("Failed to compact task:", err),
 				)
-				if ("disableAutoScrollRef" in chatState) {
-					;(chatState as any).disableAutoScrollRef.current = false
-				}
+				reengageAutoScrollBriefly(chatState)
 				return
 			}
 
@@ -298,11 +343,7 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 				// New tasks clear optimistically before the RPC; the repeated success cleanup is idempotent.
 				if (messageSent) {
 					clearSentMessageState()
-
-					// Reset auto-scroll
-					if ("disableAutoScrollRef" in chatState) {
-						;(chatState as any).disableAutoScrollRef.current = false
-					}
+					reengageAutoScrollBriefly(chatState)
 				}
 			}
 		},
@@ -322,6 +363,9 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 			setPendingUserMessage,
 			setPendingResponse,
 			chatState,
+			navigateToChat,
+			planModeSelected,
+			planRoutingPolicy,
 		],
 	)
 
@@ -490,16 +534,12 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 					break
 			}
 
-			if ("disableAutoScrollRef" in chatState) {
-				;(chatState as any).disableAutoScrollRef.current = false
-			}
+			reengageAutoScrollBriefly(chatState)
 		},
 		[
 			clineAsk,
 			lastMessage,
-			messages,
 			clearInputState,
-			handleSendMessage,
 			startNewTask,
 			chatState,
 			backgroundCommandRunning,

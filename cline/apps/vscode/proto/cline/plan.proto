@@ -1,0 +1,79 @@
+syntax = "proto3";
+
+package cline;
+
+import "cline/common.proto";
+
+option go_package = "github.com/cline/grpc-go/cline";
+option java_multiple_files = true;
+option java_package = "bot.cline.proto";
+
+// Service for Unlok's step-plan execution mode: decompose a goal into
+// priced, tiered steps, then run them one at a time or all at once, with
+// the user's approval gating every run. See getUnlokWorkspaceInfo.ts for
+// the sibling pattern this follows on the backend-call side.
+service PlanService {
+  // Sends the goal to POST /v1/plan and returns the generated plan.
+  rpc generatePlan(GeneratePlanRequest) returns (PlanState);
+
+  // Streams the live plan state (steps, run status, paused-after) as it
+  // changes -- same shape as AccountService's subscribeToAuthStatusUpdate.
+  rpc subscribeToPlanState(EmptyRequest) returns (stream PlanState);
+
+  // Runs the next pending step ("step") or every remaining step in order
+  // ("run_remaining"), pausing between steps for approval either way.
+  rpc runPlanSteps(RunPlanStepsRequest) returns (Empty);
+
+  // Edits a step's title/scope/tier, or removes it, before it runs.
+  rpc editPlanStep(EditPlanStepRequest) returns (PlanState);
+
+  // Discards the current plan (e.g. the user starts a fresh goal).
+  rpc clearPlan(EmptyRequest) returns (Empty);
+}
+
+message PlanCostEstimate {
+  bool is_range = 1;
+  double exact_usd = 2;
+  double low_usd = 3;
+  double high_usd = 4;
+}
+
+message PlanStep {
+  string id = 1;
+  string title = 2;
+  string scope = 3; // e.g. "7 files", "relay/router.ts", "npm test"
+  string tier = 4; // "fast" | "cheap" | "smart"
+  string kind = 5; // "llm_step" | "tool_only_step"
+  string depends_on_step_id = 6; // empty = no dependency
+  PlanCostEstimate estimate = 7;
+  string status = 8; // "pending" | "in_progress" | "done" | "skipped"
+}
+
+message PlanState {
+  repeated PlanStep steps = 1;
+  PlanCostEstimate total_estimate = 2;
+  string routing_policy = 3;
+  int32 done_count = 4;
+  string run_status = 5; // "idle" | "running" | "paused" | "completed" | "failed"
+  string paused_after_step_id = 6; // empty when not paused
+}
+
+message GeneratePlanRequest {
+  Metadata metadata = 1;
+  string goal = 2;
+  string routing_policy = 3;
+}
+
+message RunPlanStepsRequest {
+  Metadata metadata = 1;
+  string mode = 2; // "run_remaining" | "step"
+}
+
+message EditPlanStepRequest {
+  Metadata metadata = 1;
+  string step_id = 2;
+  string title = 3;
+  string scope = 4;
+  string tier = 5;
+  bool remove = 6;
+}

@@ -59,6 +59,7 @@ import { createProviderCatalog } from "./model-catalog/catalog"
 import type { Disposable, ProviderCatalog, ProviderConfigChange, ProviderConfigStore } from "./model-catalog/contracts"
 import { parseProviderId } from "./model-catalog/provider-id"
 import { createProviderConfigStore } from "./model-catalog/store"
+import { PlanCoordinator } from "./plan-coordinator"
 import {
 	PROVIDER_FAILURE_ERROR_TYPE,
 	PROVIDER_FAILURE_PHASE,
@@ -175,6 +176,8 @@ export class Controller {
 	private sessionConfigBuilder: SdkSessionConfigBuilder
 	private taskHistory: SdkTaskHistory
 	private mode: SdkModeCoordinator
+	/** Public like stateManager below -- plan RPC handlers (core/controller/plan/*.ts) call this directly. */
+	plan: PlanCoordinator
 	private mcpTools: SdkMcpCoordinator
 	private terminalExecutionMode: SdkTerminalExecutionModeCoordinator
 	private providerChanges: SdkProviderChangeCoordinator
@@ -243,7 +246,7 @@ export class Controller {
 	})
 
 	// Watches user-instruction files (workflows/skills/rules), including those
-	// materialized by remote config under `.cline/remote-config/`. Used to expand
+	// materialized by remote config under `.unlok/remote-config/`. Used to expand
 	// `/workflow` and `/skill` slash commands into their instruction bodies before
 	// the prompt reaches the model — the same mechanism the CLI uses in
 	// `buildUserInputMessage`. The agent loop never auto-expands commands, so this
@@ -290,10 +293,10 @@ export class Controller {
 			this.handleProviderConfigChange(event)
 		})
 
-		// IMPORTANT: Use ~/.cline/data/settings/ for the settings directory,
+		// IMPORTANT: Use ~/.unlok/data/settings/ for the settings directory,
 		// NOT ensureSettingsDirectoryExists() which returns the VSCode extension
 		// storage path (HostProvider.globalStorageFsPath/settings/). The MCP
-		// settings file lives at ~/.cline/data/settings/cline_mcp_settings.json
+		// settings file lives at ~/.unlok/data/settings/cline_mcp_settings.json
 		// (shared across VSCode, CLI, and JetBrains clients).
 		this.mcpHub = new McpHub(
 			() => ensureMcpServersDirectoryExists(),
@@ -368,7 +371,7 @@ export class Controller {
 			},
 			shouldAutoApproveTool: (request) => {
 				const autoApprovalSettings = this.stateManager.getGlobalSettingsKey("autoApprovalSettings")
-				return autoApprovalSettings ? isToolAutoApproved(request.toolName, autoApprovalSettings) : false
+				return autoApprovalSettings ? isToolAutoApproved(request.toolName, request.input, autoApprovalSettings) : false
 			},
 			getCwd: () => this.lastKnownWorkspaceRoot,
 		})
@@ -509,6 +512,19 @@ export class Controller {
 			onAutoContinueFailed: () => {
 				this.turnStateTracker.set("error")
 			},
+		})
+		this.plan = new PlanCoordinator({
+			stateManager: this.stateManager,
+			getTaskId: () => this.task?.taskId,
+			getTurnPhase: () => this.turnStateTracker.currentPhase,
+			// Reuses the exact same public entrypoint the classic Plan/Act
+			// toggle uses (SdkModeCoordinator.rebuildSessionForMode), called
+			// with mode staying "act" so it only ever rebuilds for the new
+			// model (actModeUnlokModelId, set by the caller just before this)
+			// -- no new session-lifecycle code, and it never touches the
+			// mode-switch-notice path since that no-ops when from === to.
+			rebuildSessionForStep: (_tier, prompt) =>
+				this.mode.rebuildSessionForMode("act", { autoContinue: true, userContinuationPrompt: prompt }),
 		})
 		this.mcpTools = new SdkMcpCoordinator({
 			stateManager: this.stateManager,
@@ -879,7 +895,7 @@ export class Controller {
 			return false
 		}
 		// Remote config may have materialized new workflows/skills/rules under
-		// `.cline/remote-config/`. Refresh the watcher so slash-command expansion
+		// `.unlok/remote-config/`. Refresh the watcher so slash-command expansion
 		// sees them without waiting on filesystem events.
 		await this.refreshUserInstructionWatchers()
 		return refreshed
@@ -944,8 +960,8 @@ export class Controller {
 	/**
 	 * Lazily create (or rebuild on workspace-root change) the user-instruction
 	 * watcher. Pointed at the workspace root so it discovers both local config
-	 * (`.clinerules/workflows`, `.cline/workflows`, …) and remote-config files
-	 * materialized under `<root>/.cline/remote-config/{workflows,skills,rules}`.
+	 * (`.unlokrules/workflows`, `.unlok/workflows`, …) and remote-config files
+	 * materialized under `<root>/.unlok/remote-config/{workflows,skills,rules}`.
 	 *
 	 * `workspaceRoot` is resolved by the caller so the memoization check below runs
 	 * synchronously on entry — there is no `await` before the assignment, so
@@ -1108,7 +1124,7 @@ export class Controller {
 
 	/**
 	 * Directory used when no workspace folder is open: the SDK's shared chat
-	 * workspace (`~/.cline/data/workspaces/chat`, seeded with an AGENTS.md
+	 * workspace (`~/.unlok/data/workspaces/chat`, seeded with an AGENTS.md
 	 * etiquette file), matching how the desktop app and CLI host sessions
 	 * started without a project. Desktop is only a last resort when the chat
 	 * workspace cannot be created. Memoized so repeated no-workspace calls
@@ -1248,7 +1264,7 @@ export class Controller {
 	/**
 	 * Emit a proper auth error for the 'cline' provider when the user is not
 	 * logged in. The message sequence drives ErrorRow to render the
-	 * "Sign in to Cline" button.
+	 * "Sign in to Unlok" button.
 	 *
 	 * Message sequence:
 	 *   1. say:'task'           – the user's message text
@@ -1953,6 +1969,12 @@ export class Controller {
 	async handleHicapCallback(code: string): Promise<void> {
 		await this.authService.handleHicapCallback(code)
 		this.persistProviderApiKeyFromState("hicap")
+		await this.postStateToWebview()
+	}
+
+	async handleUnlokCallback(code: string, name?: string): Promise<void> {
+		await this.authService.handleUnlokCallback(code, name)
+		this.persistProviderApiKeyFromState("unlok")
 		await this.postStateToWebview()
 	}
 

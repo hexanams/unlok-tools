@@ -44,6 +44,14 @@ service AccountService {
 
   rpc hicapAuthClicked(EmptyRequest) returns (Empty);
 
+  rpc unlokAuthClicked(EmptyRequest) returns (Empty);
+
+  // Fetches what the signed-in Unlok workspace allows: selectable models,
+  // Unlok+ budget spent/cap this month, and how many models the org has
+  // disabled. Shown on the sign-in screen once auth succeeds, per the
+  // "don't drop the user into an empty chat with no information" brief.
+  rpc getUnlokWorkspaceInfo(EmptyRequest) returns (UnlokWorkspaceInfo);
+
   // Returns a link the webview can use to redirect back to the user's IDE.
   rpc getRedirectUrl(EmptyRequest) returns (String);
 
@@ -111,6 +119,29 @@ message OrganizationCreditsData {
 
 message UserCreditsBalance {
   double current_balance = 1;
+}
+
+message UnlokWorkspaceModel {
+  string provider = 1;
+  string model = 2;
+  string label = 3;
+  bool credentialed = 4; // does this account actually have usable access to this provider right now (BYOK key on file, or covered by Unlok+ pooled credentials)
+  bool pinnable = 5; // can this specific model be pinned, as opposed to only reachable via auto-routing
+}
+
+message UnlokWorkspaceBudget {
+  double spent_usd = 1;
+  double cap_usd = 2;
+}
+
+message UnlokWorkspaceInfo {
+  string access_mode = 1; // "unlok" (managed/Unlok+) or "byok"
+  repeated UnlokWorkspaceModel models = 2; // already excludes disabled_model_count models
+  UnlokWorkspaceBudget budget = 3;
+  int32 disabled_model_count = 4;
+  int32 total_selectable_models = 5; // models.length + disabled_model_count, for "N of M" display
+  string user_name = 6; // display name captured at sign-in (extension-local, not persisted by the backend); empty if signed in with a pasted key instead of the OAuth flow
+  string user_email = 7; // from GET /v1/me, always present once signed in
 }
 
 message UsageTransaction {

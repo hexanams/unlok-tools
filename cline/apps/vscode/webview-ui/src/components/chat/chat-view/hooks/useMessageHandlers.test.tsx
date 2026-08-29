@@ -9,6 +9,7 @@ const askResponse = vi.fn().mockResolvedValue(undefined)
 const clearTask = vi.fn().mockResolvedValue(undefined)
 const condense = vi.fn().mockResolvedValue(undefined)
 const trackIntent = vi.fn().mockResolvedValue(undefined)
+const generatePlan = vi.fn().mockResolvedValue(undefined)
 
 vi.mock("@/services/grpc-client", () => ({
 	TaskServiceClient: {
@@ -23,6 +24,9 @@ vi.mock("@/services/grpc-client", () => ({
 	UiServiceClient: {
 		trackIntent: (req: unknown) => trackIntent(req),
 	},
+	PlanServiceClient: {
+		generatePlan: (req: unknown) => generatePlan(req),
+	},
 }))
 
 // Proto request factories just echo their input so we can assert on it.
@@ -36,6 +40,9 @@ vi.mock("@shared/proto/cline/ui", () => ({
 vi.mock("@shared/proto/cline/common", () => ({
 	EmptyRequest: { create: (x: unknown) => x },
 	StringRequest: { create: (x: unknown) => x },
+}))
+vi.mock("@shared/proto/cline/plan", () => ({
+	GeneratePlanRequest: { create: (x: unknown) => x },
 }))
 
 // useExtensionState supplies turnState (+ backgroundCommandRunning) to the hook.
@@ -78,6 +85,10 @@ function makeChatState(messages: ClineMessage[], overrides: Partial<ChatState> =
 		setPendingUserMessage: vi.fn(),
 		pendingResponse: undefined,
 		setPendingResponse: vi.fn(),
+		planModeSelected: false,
+		setPlanModeSelected: vi.fn(),
+		planRoutingPolicy: "balanced",
+		setPlanRoutingPolicy: vi.fn(),
 		textAreaRef: { current: null },
 		lastMessage: last,
 		secondLastMessage: messages.at(-2),
@@ -669,5 +680,25 @@ describe("useMessageHandlers — send routing", () => {
 		expect(newTask).toHaveBeenCalledTimes(1)
 		expect(newTask).toHaveBeenCalledWith(expect.objectContaining({ text: "should be sent", images: [], files: [] }))
 		expect(askResponse).not.toHaveBeenCalled()
+	})
+
+	// Plan pill selected: the goal goes to generatePlan, never to the normal
+	// chat send path -- see ChatTextArea's setChatMode for why this branches
+	// on planModeSelected rather than the underlying (always "act") Mode.
+	it("routes to generatePlan instead of newTask/askResponse when the Plan pill is selected", async () => {
+		mockTurnState = { phase: "idle", seq: 1 }
+		const setInputValue = vi.fn()
+		const { result } = renderHook(() =>
+			useMessageHandlers([], makeChatState([], { planModeSelected: true, planRoutingPolicy: "cost_first", setInputValue })),
+		)
+
+		await act(async () => {
+			await result.current.handleSendMessage("fix the escalation flag", [], [])
+		})
+
+		expect(generatePlan).toHaveBeenCalledWith({ goal: "fix the escalation flag", routingPolicy: "cost_first" })
+		expect(newTask).not.toHaveBeenCalled()
+		expect(askResponse).not.toHaveBeenCalled()
+		expect(setInputValue).toHaveBeenCalledWith("")
 	})
 })

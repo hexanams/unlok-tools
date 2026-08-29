@@ -129,6 +129,16 @@ export class SharedUriHandler {
 					Logger.warn("SharedUriHandler: Missing code parameter for Hicap callback")
 					return false
 				}
+				case "/unlok": {
+					const code = query.get("code")
+					if (code) {
+						const name = query.get("name") ?? undefined
+						await visibleWebview.controller.handleUnlokCallback(code, name)
+						return true
+					}
+					Logger.warn("SharedUriHandler: Missing code parameter for Unlok callback")
+					return false
+				}
 				default:
 					Logger.warn(`SharedUriHandler: Unknown path: ${path}`)
 					return false

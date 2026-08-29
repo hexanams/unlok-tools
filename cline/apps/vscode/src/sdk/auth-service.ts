@@ -241,6 +241,15 @@ export class AuthService {
 
 	private _authenticated = false
 	private _clineAuthInfo: ClineAuthInfo | null = null
+	// Captured from the Unlok sign-in callback's query params (sourced from
+	// Clerk client-side on unlok-frontend's authorize page) -- in-memory
+	// only, not persisted to providers.json or StateManager, since it's
+	// re-sent fresh on every sign-in and there's nowhere on the backend's
+	// User row to read it back from on restart (see app/me.py's docstring:
+	// no `name` column, Clerk is the identity source of truth). Lost across
+	// a window reload until the next sign-in -- acceptable, the connected
+	// screen falls back to email-only (from GET /v1/me) until then.
+	private _unlokUserName: string | undefined
 	private _activeAuthStatusUpdateHandlers = new Set<StreamingResponseHandler<AuthState>>()
 	private _handlerToController = new Map<StreamingResponseHandler<AuthState>, Controller>()
 	private _refreshPromise: Promise<string | undefined> | null = null
@@ -1181,5 +1190,26 @@ export class AuthService {
 	 */
 	async handleHicapCallback(code: string): Promise<void> {
 		this.setProviderApiKey("hicap", "hicapApiKey", code)
+	}
+
+	/**
+	 * Handle Unlok sign-in callback. `name` is the display name
+	 * unlok-frontend's authorize page read off the signed-in Clerk user and
+	 * passed straight through in the callback URL -- captured here so the
+	 * connected screen can greet the user by name instead of just showing a
+	 * generic "Connected" badge.
+	 */
+	async handleUnlokCallback(code: string, name?: string): Promise<void> {
+		this._unlokUserName = name
+		this.setProviderApiKey("unlok", "unlokApiKey", code)
+	}
+
+	/**
+	 * The display name captured at the most recent Unlok sign-in, if any.
+	 * See _unlokUserName's declaration for why this doesn't survive a
+	 * window reload.
+	 */
+	getUnlokUserName(): string | undefined {
+		return this._unlokUserName
 	}
 }
