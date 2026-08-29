@@ -889,6 +889,27 @@ const OPENAI_COMPATIBLE_SPEC_OVERRIDES: BuiltinSpecOverride[] = [
 		defaults: { baseUrl: "https://api.hicap.ai/v1" },
 	},
 	{
+		id: "unlok",
+		name: "Unlok",
+		description: "Unlok's auto-routing model gateway",
+		family: "openai-compatible",
+		defaultModelId: "auto",
+		apiKeyEnv: ["UNLOK_API_KEY"],
+		defaults: { baseUrl: "https://unlok-backend-xpts.onrender.com/v1" },
+		// Unlok is a LiteLLM-based gateway that can resolve to a real Anthropic
+		// model (the "smart" tier, or a literal anthropic/* pin) same as OCA's
+		// gateway below -- without this, litellm never receives the
+		// cache_control breakpoints Anthropic prompt caching requires (it's
+		// opt-in per-request, litellm doesn't add it on its own; confirmed
+		// against litellm's own anthropic transformation source). Every
+		// smart-tier turn was re-billing the full system prompt + tool
+		// definitions + history as fresh input tokens with zero cache
+		// discount. Scoped by model family internally (routing.promptCache's
+		// "anthropic-compatible" matcher), so this has no effect when Unlok
+		// resolves to an OpenAI/Groq/Gemini model.
+		metadata: ANTHROPIC_ROUTING_METADATA,
+	},
+	{
 		id: "nousResearch",
 		name: "Nous Research",
 		description: "Open-source AI research lab",
