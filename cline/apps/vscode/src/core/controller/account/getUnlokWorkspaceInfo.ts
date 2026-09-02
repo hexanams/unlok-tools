@@ -52,6 +52,19 @@ export async function getUnlokWorkspaceInfo(controller: Controller, _request: Em
 			totalSelectableModels: Number(data.total_selectable_models ?? 0),
 			userName: AuthService.getInstance().getUnlokUserName() ?? "",
 			userEmail: String(data.email ?? ""),
+			// Metadata only (repo name, a language summary derived from
+			// manifests, a README excerpt) -- never file content. See
+			// docs/plans/2026-09-02-github-integrations-and-optimus-context.md.
+			// Real file content, for a repo with AI context turned on in the
+			// dashboard, is a separate on-demand call (POST /v1/repo-context),
+			// not part of this sign-in-time fetch.
+			connectedRepos: Array.isArray(data.connected_repos)
+				? data.connected_repos.map((r: Record<string, unknown>) => ({
+						fullName: String(r.full_name ?? ""),
+						languagesSummary: String(r.languages_summary ?? ""),
+						readmeExcerpt: String(r.readme_excerpt ?? ""),
+					}))
+				: [],
 		})
 	} catch (error) {
 		Logger.error(`Failed to fetch Unlok workspace info: ${error}`)

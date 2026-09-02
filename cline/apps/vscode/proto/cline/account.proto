@@ -142,6 +142,16 @@ message UnlokWorkspaceInfo {
   int32 total_selectable_models = 5; // models.length + disabled_model_count, for "N of M" display
   string user_name = 6; // display name captured at sign-in (extension-local, not persisted by the backend); empty if signed in with a pasted key instead of the OAuth flow
   string user_email = 7; // from GET /v1/me, always present once signed in
+  repeated UnlokConnectedRepo connected_repos = 8; // GitHub repos connected via the dashboard's Integrations page, metadata only -- see docs/plans/2026-09-02-github-integrations-and-optimus-context.md
+}
+
+// Metadata for one connected, scanning repo -- file content is never
+// included here. A repo only appears once its scan has completed at least
+// once; a freshly connected repo isn't listed until then.
+message UnlokConnectedRepo {
+  string full_name = 1; // "org/repo"
+  string languages_summary = 2; // e.g. "npm, pip" -- derived from manifests found during scanning, empty if none matched
+  string readme_excerpt = 3; // first ~300 characters of the repo's README, empty if it has none
 }
 
 message UsageTransaction {
