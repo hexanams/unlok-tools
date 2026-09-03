@@ -3,7 +3,7 @@
 // Creates and manages SDK sessions using ClineCore. This factory handles:
 // - Creating ClineCore instances with proper configuration
 // - Building session config from legacy state (provider, model, API key)
-// - Custom session persistence adapter reading ~/.cline/data/tasks/
+// - Custom session persistence adapter reading ~/.unlok/data/tasks/
 // - Mapping HistoryItem ↔ SDK session fields
 //
 // The factory does NOT handle UI concerns — that's the SdkController's job.
@@ -38,10 +38,12 @@ import type { Mode } from "@shared/storage/types"
 import { reasoningEffortFromThinkingBudget } from "@shared/utils/reasoning-support"
 import { stringifyVsCodeLmModelSelector } from "@shared/vsCodeSelectorUtils"
 import { StateManager } from "@/core/storage/StateManager"
+import { fetchUnlokConnectedRepos, matchConnectedRepo } from "@/core/controller/account/unlokConnectedRepos"
 import { HostProvider } from "@/hosts/host-provider"
 import { ExtensionRegistryInfo } from "@/registry"
 import { getDistinctId } from "@/services/logging/distinctId"
 import { fetch } from "@/shared/net"
+import { getGitRemoteUrls } from "@/utils/git"
 import { type BedrockProviderConfig, buildBedrockProviderConfig } from "./bedrock-config"
 import { buildAgentHooks } from "./hooks-adapter"
 import { readTaskHistory, resolveDataDir } from "./legacy-state-reader"
@@ -334,6 +336,35 @@ function resolveCommittedRuntimeModel(
 	}
 }
 
+/**
+ * Without this, the system prompt says nothing about which model is actually
+ * running, so the model has no grounding and tends to deflect ("I don't have
+ * a specific model to share") when asked what model it is, unlike a raw
+ * provider playground, where there is no persona prompt masking the answer.
+ * Unlok's "unlok" provider can be pinned to a literal `provider/model` or left
+ * on "auto", where the backend picks the real model per request, so the two
+ * cases need different, honest phrasing rather than a single hardcoded name.
+ */
+// Mirrors app/routing.py's TIER_ALIASES keys -- a tier name (as opposed to
+// "auto" or a literal "provider/model") still resolves to a real candidate
+// pool server-side (app/routing.py::resolve_model_alias), not one fixed
+// model, so it needs the same honest "I don't have exact visibility"
+// phrasing as "auto," just scoped to that one tier's pool.
+const KNOWN_TIER_NAMES = new Set(["smart", "fast", "cheap"])
+
+function resolveModelIdentityText(providerId: string, modelId: string | undefined): string | undefined {
+	if (providerId !== "unlok" || !modelId) {
+		return undefined
+	}
+	if (modelId === "auto") {
+		return "Model identity: Unlok automatically routes each message to whichever underlying model fits it best, so there is no single fixed model for this whole conversation. If asked what model, LLM, or version you are, say so plainly: explain that Unlok auto routes per message and you do not have visibility into exactly which underlying model is answering right now, rather than deflecting or claiming to have no information at all."
+	}
+	if (KNOWN_TIER_NAMES.has(modelId)) {
+		return `Model identity: Unlok routes this conversation to a real model from its "${modelId}" tier -- a pool of comparable models, not one fixed model pinned for the whole conversation. If asked what model, LLM, or version you are, say so plainly: explain that you're running on Unlok's "${modelId}" tier and you don't have exact visibility into which specific underlying model is answering right now, rather than deflecting or claiming to have no information at all.`
+	}
+	return `Model identity: You are currently running on ${modelId}. If asked what model, LLM, or version you are, answer plainly and specifically with this real model name, the same way you would in a raw API playground. Do not deflect or claim you have no specific model to share.`
+}
+
 // ---------------------------------------------------------------------------
 // Provider → API key field mapping
 // ---------------------------------------------------------------------------
@@ -376,6 +407,7 @@ const PROVIDER_API_KEY_MAP: Record<string, keyof ApiConfiguration> = {
 	dify: "difyApiKey",
 	minimax: "minimaxApiKey",
 	hicap: "hicapApiKey",
+	unlok: "unlokApiKey",
 	aihubmix: "aihubmixApiKey",
 	nousResearch: "nousResearchApiKey",
 	"vercel-ai-gateway": "vercelAiGatewayApiKey",
@@ -414,6 +446,7 @@ const PROVIDER_MODEL_ID_MAP: Record<string, { plan: keyof ApiConfiguration; act:
 	oca: { plan: "planModeOcaModelId", act: "actModeOcaModelId" },
 	aihubmix: { plan: "planModeAihubmixModelId", act: "actModeAihubmixModelId" },
 	hicap: { plan: "planModeHicapModelId", act: "actModeHicapModelId" },
+	unlok: { plan: "planModeUnlokModelId", act: "actModeUnlokModelId" },
 	nousResearch: { plan: "planModeNousResearchModelId", act: "actModeNousResearchModelId" },
 	"vercel-ai-gateway": { plan: "planModeVercelAiGatewayModelId", act: "actModeVercelAiGatewayModelId" },
 }
@@ -902,10 +935,18 @@ export async function buildSessionConfig(input: SessionConfigInput): Promise<Cor
 			? (resolveOcaReasoningConfig(mode, apiConfig) ?? resolveProviderReasoningConfig(providerId))
 			: resolveProviderReasoningConfig(providerId)
 
+	// isClineProvider only recognizes the legacy "cline"/"cline-pass" ids --
+	// real Unlok-signed-in sessions set providerId to "unlok" (see
+	// common.ts's sign-in flow), which isClineProvider was never updated to
+	// include. Both blocks below are genuinely Unlok-account features
+	// (observability metadata, connected-repo context), so both use this
+	// corrected check rather than the stale one.
+	const isUnlokRoutedProvider = isClineProvider(providerId) || providerId === "unlok"
+
 	// Include rich workspace metadata so Cline API observability can extract
 	// git remotes and the latest commit hash from the system message.
 	let workspaceMetadata: string | undefined
-	if (isClineProvider(providerId)) {
+	if (isUnlokRoutedProvider) {
 		try {
 			workspaceMetadata = await buildWorkspaceMetadata(workspaceRoot)
 		} catch (error) {
@@ -923,6 +964,7 @@ export async function buildSessionConfig(input: SessionConfigInput): Promise<Cor
 			metadata: workspaceMetadata,
 			mode: mode === "plan" ? "plan" : "act",
 			providerId,
+			modelIdentity: resolveModelIdentityText(providerId, committedRuntimeModel?.modelId ?? modelId),
 			platform: process.platform,
 			// The extension never exposes switch_to_act_mode (unlike the CLI):
 			// matching the legacy extension, the user must flip the Plan/Act
@@ -946,6 +988,38 @@ export async function buildSessionConfig(input: SessionConfigInput): Promise<Cor
 		}
 	} catch (error) {
 		Logger.warn("[SessionFactory] Failed to inject preferredLanguage instructions:", error)
+	}
+
+	// Surface connected-repo metadata (languages, README excerpt) from the
+	// dashboard's Integrations page when the open workspace matches one of
+	// them by git remote -- the actual "Optimus has context of your repos"
+	// path this data was scanned for; previously fetched (getUnlokWorkspaceInfo.ts)
+	// but never reached past a UI card. Metadata only, same "never file
+	// content here" boundary as everywhere else this data appears; a repo's
+	// real source is the separate, on-demand POST /v1/repo-context call.
+	// Every failure mode (no git repo, no match, fetch error, signed out)
+	// degrades to simply not adding this section -- never blocks session
+	// creation, same defensive shape as every block above.
+	if (isUnlokRoutedProvider && apiKey) {
+		try {
+			const remoteLines = await getGitRemoteUrls(workspaceRoot)
+			if (remoteLines.length > 0) {
+				const connectedRepos = await fetchUnlokConnectedRepos(apiKey)
+				const match = matchConnectedRepo(remoteLines, connectedRepos)
+				if (match) {
+					const parts = [`# Connected Repository Context\n\nThis workspace is "${match.fullName}", connected via Unlok's Integrations page.`]
+					if (match.languagesSummary) {
+						parts.push(`Detected stack: ${match.languagesSummary}.`)
+					}
+					if (match.readmeExcerpt) {
+						parts.push(`README excerpt:\n${match.readmeExcerpt}`)
+					}
+					systemPrompt = `${systemPrompt}\n\n${parts.join(" ")}`
+				}
+			}
+		} catch (error) {
+			Logger.warn("[SessionFactory] Failed to inject connected-repo context:", error)
+		}
 	}
 
 	const stateManager = StateManager.get()

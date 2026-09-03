@@ -893,7 +893,19 @@ const OPENAI_COMPATIBLE_SPEC_OVERRIDES: BuiltinSpecOverride[] = [
 		name: "Unlok",
 		description: "Unlok's auto-routing model gateway",
 		family: "openai-compatible",
-		defaultModelId: "auto",
+		// "smart" (a real fallback-eligible pool, app/routing.py's TIER_ALIASES
+		// -- see resolve_model_alias), not "auto": auto mode's classifier has
+		// no awareness a request carries tool calls (confirmed in
+		// app/routing.py -- classify_intent_confidence/classify_intent_llm
+		// never inspect payload.tools), so a short agentic turn ("continue",
+		// "yes") could land on the fast tier, whose primary model
+		// (groq/openai/gpt-oss-20b) has a confirmed-live failure mode under
+		// tool-calling load (model_catalog.py's own comment: default-on
+		// reasoning can burn the whole completion budget and return empty
+		// content) -- fine for a one-off Q&A call, a much worse failure for
+		// Cline's tool-calling loop. Every Optimus turn is agentic, so it
+		// always wants the smart tier's pool, never the blind classifier.
+		defaultModelId: "smart",
 		apiKeyEnv: ["UNLOK_API_KEY"],
 		defaults: { baseUrl: "https://unlok-backend-xpts.onrender.com/v1" },
 		// Unlok is a LiteLLM-based gateway that can resolve to a real Anthropic

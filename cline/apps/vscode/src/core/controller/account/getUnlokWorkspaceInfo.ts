@@ -5,6 +5,7 @@ import { AuthService } from "@/sdk/auth-service"
 import { getAxiosSettings } from "@/shared/net"
 import { Logger } from "@/shared/services/Logger"
 import type { Controller } from "../index"
+import { parseConnectedRepos } from "./unlokConnectedRepos"
 
 // Same URL the SDK's builtin Unlok provider config uses for chat completions
 // (sdk/packages/llms/src/providers/builtins.ts) -- duplicated rather than
@@ -58,13 +59,7 @@ export async function getUnlokWorkspaceInfo(controller: Controller, _request: Em
 			// Real file content, for a repo with AI context turned on in the
 			// dashboard, is a separate on-demand call (POST /v1/repo-context),
 			// not part of this sign-in-time fetch.
-			connectedRepos: Array.isArray(data.connected_repos)
-				? data.connected_repos.map((r: Record<string, unknown>) => ({
-						fullName: String(r.full_name ?? ""),
-						languagesSummary: String(r.languages_summary ?? ""),
-						readmeExcerpt: String(r.readme_excerpt ?? ""),
-					}))
-				: [],
+			connectedRepos: parseConnectedRepos(data),
 		})
 	} catch (error) {
 		Logger.error(`Failed to fetch Unlok workspace info: ${error}`)
