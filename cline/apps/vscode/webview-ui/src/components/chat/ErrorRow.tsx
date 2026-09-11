@@ -8,6 +8,7 @@ import CreditLimitError from "@/components/chat/CreditLimitError"
 import EntitlementError from "@/components/chat/EntitlementError"
 import OrgClinePassRestrictionError from "@/components/chat/OrgClinePassRestrictionError"
 import SpendLimitError from "@/components/chat/SpendLimitError"
+import { UnlokWorkspaceErrorActions } from "@/components/chat/UnlokWorkspaceErrorActions"
 import { Button } from "@/components/ui/button"
 import { useClineAuth, useClineSignIn } from "@/context/ClineAuthContext"
 import { ClineError, ClineErrorType } from "../../../../src/services/error/ClineError"
@@ -66,6 +67,7 @@ const ErrorRow = memo(({ message, errorType, apiRequestFailedMessage, apiReqStre
 								budgetPeriod={d?.budget_period}
 								limitUsd={d?.limit_usd}
 								message={d?.message || errorMessage}
+								providerId={providerId}
 								resetsAt={d?.resets_at}
 								spentUsd={d?.spent_usd}
 							/>
@@ -120,7 +122,7 @@ const ErrorRow = memo(({ message, errorType, apiRequestFailedMessage, apiReqStre
 									Whoops looks like you're logged out – click below to sign in
 								</div>
 								<Button className="w-full" disabled={isLoginLoading} onClick={handleSignIn}>
-									Sign in to Cline
+									Sign in to Unlok
 									{isLoginLoading && (
 										<span className="ml-1 animate-spin">
 											<span className="codicon codicon-refresh" />
@@ -163,6 +165,9 @@ const ErrorRow = memo(({ message, errorType, apiRequestFailedMessage, apiReqStre
 
 							{/* Display raw API error if different from parsed error message */}
 							{errorMessage !== rawApiError && <div>{rawApiError}</div>}
+
+							{/* Unlok multi workspace: offer a switch, a reconnect, or adding one */}
+							<UnlokWorkspaceErrorActions />
 						</p>
 					)
 				}
@@ -181,7 +186,7 @@ const ErrorRow = memo(({ message, errorType, apiRequestFailedMessage, apiReqStre
 				return (
 					<div className="flex flex-col p-2 rounded text-xs opacity-80 bg-quote text-foreground">
 						<div>
-							Cline tried to access <code>{message.text}</code> which is blocked by the <code>.clineignore</code>
+							I tried to access <code>{message.text}</code> which is blocked by the <code>.unlokignore</code>
 							file.
 						</div>
 					</div>

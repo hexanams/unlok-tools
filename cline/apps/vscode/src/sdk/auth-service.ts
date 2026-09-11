@@ -8,6 +8,7 @@
 // disk — it's fetched from the Cline API on startup and cached in memory.
 // This matches the CLI's pattern (see apps/cli/src/runtime/interactive-welcome.ts).
 
+import { addOrReplaceUnlokWorkspace } from "@/core/controller/account/unlokWorkspaces"
 import type { ITelemetryService, OAuthCredentials, ProviderSettings } from "@cline/core"
 import {
 	createOAuthClientCallbacks,
@@ -235,6 +236,18 @@ function clearClineCredentials(): void {
 // ---------------------------------------------------------------------------
 // AuthService
 // ---------------------------------------------------------------------------
+
+/**
+ * What unlok-frontend's authorize page sends back alongside the key: the
+ * display name (greeting), plus the email and workspace label so the
+ * connection can be listed by name without another round trip.
+ */
+export interface UnlokCallbackDetails {
+	name?: string
+	email?: string
+	workspaceName?: string
+	teamId?: string
+}
 
 export class AuthService {
 	private static instance: AuthService | null = null
@@ -1199,9 +1212,18 @@ export class AuthService {
 	 * connected screen can greet the user by name instead of just showing a
 	 * generic "Connected" badge.
 	 */
-	async handleUnlokCallback(code: string, name?: string): Promise<void> {
-		this._unlokUserName = name
+	async handleUnlokCallback(code: string, details?: UnlokCallbackDetails): Promise<void> {
+		this._unlokUserName = details?.name
 		this.setProviderApiKey("unlok", "unlokApiKey", code)
+		// Keep the connection in the multi workspace list too (and make it the
+		// active one). Same account and workspace already listed means the key
+		// is replaced in place, so a reconnect never duplicates a row.
+		addOrReplaceUnlokWorkspace(StateManager.get(), {
+			apiKey: code,
+			email: details?.email ?? "",
+			workspaceName: details?.workspaceName ?? "",
+			teamId: details?.teamId ?? "",
+		})
 	}
 
 	/**

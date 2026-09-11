@@ -72,7 +72,7 @@ const ConnectPanel: React.FC = () => {
 					Sign in with Unlok
 				</VSCodeButton>
 				<p className="m-0 text-description text-[11px]">
-					Opens Unlok, you press Authorize, the key comes straight back. Nothing to copy.
+					Opens Unlok in your browser, you confirm the connection, and you are brought straight back. Nothing to copy.
 				</p>
 			</div>
 

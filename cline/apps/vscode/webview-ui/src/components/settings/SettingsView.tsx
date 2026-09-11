@@ -4,6 +4,7 @@ import { ResetStateRequest } from "@shared/proto/cline/state"
 import type { UserOrganization } from "@shared/proto/index.cline"
 import {
 	CheckCheck,
+	CircleUserRoundIcon,
 	FlaskConical,
 	HardDriveDownload,
 	Info,
@@ -24,6 +25,7 @@ import { Tab, TabContent, TabList, TabTrigger } from "../common/Tab"
 import ViewHeader from "../common/ViewHeader"
 import SectionHeader from "./SectionHeader"
 import AboutSection from "./sections/AboutSection"
+import AccountSection from "./sections/AccountSection"
 import ApiConfigurationSection from "./sections/ApiConfigurationSection"
 import DebugSection from "./sections/DebugSection"
 import FeatureSettingsSection from "./sections/FeatureSettingsSection"
@@ -34,7 +36,7 @@ import TerminalSettingsSection from "./sections/TerminalSettingsSection"
 const IS_DEV = process.env.IS_DEV
 
 // Tab definitions
-type SettingsTabID = "api-config" | "features" | "terminal" | "general" | "about" | "debug" | "remote-config"
+type SettingsTabID = "api-config" | "features" | "terminal" | "general" | "account" | "about" | "debug" | "remote-config"
 interface SettingsTab {
 	id: SettingsTabID
 	name: string
@@ -83,9 +85,16 @@ const SETTINGS_TABS: SettingsTab[] = [
 			!activeOrganization || !isAdminOrOwner(activeOrganization),
 	},
 	{
+		id: "account",
+		name: "Account",
+		tooltipText: "Account",
+		headerText: "Account",
+		icon: CircleUserRoundIcon,
+	},
+	{
 		id: "about",
 		name: "About",
-		tooltipText: "About Cline",
+		tooltipText: "About Unlok",
 		headerText: "About",
 		icon: Info,
 	},
@@ -131,6 +140,7 @@ const SettingsView = ({ onDone, targetSection }: SettingsViewProps) => {
 			features: FeatureSettingsSection,
 			terminal: TerminalSettingsSection,
 			"remote-config": RemoteConfigSection,
+			account: AccountSection,
 			about: AboutSection,
 			debug: DebugSection,
 		}),
@@ -138,7 +148,7 @@ const SettingsView = ({ onDone, targetSection }: SettingsViewProps) => {
 	) // Empty deps - these imports never change
 
 	const { version, extensionVariant, environment, settingsInitialModelTab } = useExtensionState()
-	const { activeOrganization, clineUser } = useClineAuth()
+	const { activeOrganization, clineUser, organizations } = useClineAuth()
 
 	const [activeTab, setActiveTab] = useState<string>(targetSection || SETTINGS_TABS[0].id)
 
@@ -243,10 +253,26 @@ const SettingsView = ({ onDone, targetSection }: SettingsViewProps) => {
 			props.extensionVariant = extensionVariant
 		} else if (activeTab === "api-config") {
 			props.initialModelTab = settingsInitialModelTab
+		} else if (activeTab === "account") {
+			props.clineUser = clineUser
+			props.organizations = organizations
+			props.activeOrganization = activeOrganization
+		} else if (activeTab === "general") {
+			props.onOpenAccountTab = () => setActiveTab("account")
 		}
 
 		return <Component {...props} />
-	}, [activeTab, handleResetState, settingsInitialModelTab, version, extensionVariant, TAB_CONTENT_MAP])
+	}, [
+		activeTab,
+		handleResetState,
+		settingsInitialModelTab,
+		version,
+		extensionVariant,
+		TAB_CONTENT_MAP,
+		clineUser,
+		organizations,
+		activeOrganization,
+	])
 
 	return (
 		<Tab>

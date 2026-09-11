@@ -13,9 +13,20 @@ vi.mock("@/sdk/auth-service", () => ({
 const { getUnlokWorkspaceInfo } = await import("./getUnlokWorkspaceInfo")
 
 function fakeController(apiKey: string | undefined) {
+	// The multi workspace bookkeeping (unlokWorkspaces.ts) reads and writes
+	// the `unlokWorkspaces` secret after a successful /v1/me call.
+	let workspacesSecret: string | undefined
+	let apiConfiguration: Record<string, unknown> = { unlokApiKey: apiKey }
 	return {
 		stateManager: {
-			getApiConfiguration: () => ({ unlokApiKey: apiKey }),
+			getApiConfiguration: () => apiConfiguration,
+			setApiConfiguration: (config: Record<string, unknown>) => {
+				apiConfiguration = config
+			},
+			getSecretKey: () => workspacesSecret,
+			setSecret: (_key: string, value: string | undefined) => {
+				workspacesSecret = value
+			},
 		},
 	}
 }

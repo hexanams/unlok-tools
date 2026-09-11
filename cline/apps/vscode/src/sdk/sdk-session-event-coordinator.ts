@@ -1,4 +1,5 @@
 import type { AgentEvent, CoreSessionEvent } from "@cline/core"
+import { clearUnlokWorkspaceError, markUnlokWorkspaceError } from "@/core/controller/account/unlokWorkspaces"
 import { refreshClineRecommendedModels } from "@/core/controller/models/refreshClineRecommendedModels"
 import type { StateManager } from "@/core/storage/StateManager"
 import { CLINE_RECOMMENDED_MODELS_FALLBACK } from "@/shared/cline/recommended-models"
@@ -67,6 +68,9 @@ export class SdkSessionEventCoordinator {
 
 		const result = this.translateSessionEvent(event, this.options.messageTranslatorState)
 		const agentFailure = this.getAgentFailureTelemetry(event)
+		if (agentFailure) {
+			this.markActiveUnlokWorkspaceFailure(agentFailure.error)
+		}
 		if (agentFailure && !this.options.messageTranslatorState.isSuppressedToolApprovalDenial(agentFailure.error)) {
 			this.options.captureProviderApiError?.({
 				sessionId: agentFailure.sessionId,
@@ -121,8 +125,10 @@ export class SdkSessionEventCoordinator {
 					this.options.setTurnPhase?.("error")
 				} else if (this.options.messageTranslatorState.wasAttemptCompletionSeen()) {
 					this.options.setTurnPhase?.("completed")
+					this.clearActiveUnlokWorkspaceFailure()
 				} else {
 					this.options.setTurnPhase?.("awaiting_followup")
+					this.clearActiveUnlokWorkspaceFailure()
 				}
 
 				this.options.sessions.setRunning(false)
@@ -155,6 +161,45 @@ export class SdkSessionEventCoordinator {
 				Logger.error("[SdkController] Failed to post state after event:", err)
 			})
 		}
+	}
+
+	/**
+	 * Multi workspace support: a terminal provider failure while chat runs
+	 * through Unlok is recorded on the active workspace, so the Account tab
+	 * can show it as failing and ErrorRow can offer a switch. A turn that
+	 * ends cleanly clears it again.
+	 */
+	private activeProviderIsUnlok(): boolean {
+		const stateManager = this.options.stateManager
+		if (!stateManager) {
+			return false
+		}
+		try {
+			const apiConfig = stateManager.getApiConfiguration()
+			const mode = stateManager.getGlobalSettingsKey("mode") === "plan" ? "plan" : "act"
+			const provider = mode === "plan" ? apiConfig.planModeApiProvider : apiConfig.actModeApiProvider
+			return provider === "unlok"
+		} catch {
+			return false
+		}
+	}
+
+	private markActiveUnlokWorkspaceFailure(error: unknown): void {
+		if (!this.activeProviderIsUnlok() || !this.options.stateManager) {
+			return
+		}
+		const message = error instanceof Error ? error.message : typeof error === "string" ? error : String(error ?? "")
+		if (!message) {
+			return
+		}
+		markUnlokWorkspaceError(this.options.stateManager, message)
+	}
+
+	private clearActiveUnlokWorkspaceFailure(): void {
+		if (!this.activeProviderIsUnlok() || !this.options.stateManager) {
+			return
+		}
+		clearUnlokWorkspaceError(this.options.stateManager)
 	}
 
 	private getAgentFailureTelemetry(event: CoreSessionEvent): AgentFailureTelemetry {

@@ -6,6 +6,7 @@ import { getAxiosSettings } from "@/shared/net"
 import { Logger } from "@/shared/services/Logger"
 import type { Controller } from "../index"
 import { parseConnectedRepos } from "./unlokConnectedRepos"
+import { backfillUnlokWorkspaceEmail, clearUnlokWorkspaceError } from "./unlokWorkspaces"
 
 // Same URL the SDK's builtin Unlok provider config uses for chat completions
 // (sdk/packages/llms/src/providers/builtins.ts) -- duplicated rather than
@@ -33,6 +34,12 @@ export async function getUnlokWorkspaceInfo(controller: Controller, _request: Em
 			...getAxiosSettings(),
 		})
 		const data = response.data ?? {}
+
+		// A live answer means this workspace works: clear any failure the
+		// session coordinator recorded, and fill in the email on an entry that
+		// was created from a pasted key (no authorize page to supply it).
+		backfillUnlokWorkspaceEmail(controller.stateManager, String(data.email ?? ""))
+		clearUnlokWorkspaceError(controller.stateManager)
 
 		return UnlokWorkspaceInfo.create({
 			accessMode: data.access_mode ?? "",

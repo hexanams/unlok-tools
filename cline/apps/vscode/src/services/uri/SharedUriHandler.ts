@@ -132,8 +132,12 @@ export class SharedUriHandler {
 				case "/unlok": {
 					const code = query.get("code")
 					if (code) {
-						const name = query.get("name") ?? undefined
-						await visibleWebview.controller.handleUnlokCallback(code, name)
+						await visibleWebview.controller.handleUnlokCallback(code, {
+							name: query.get("name") ?? undefined,
+							email: query.get("email") ?? undefined,
+							workspaceName: query.get("workspace") ?? undefined,
+							teamId: query.get("team_id") ?? undefined,
+						})
 						return true
 					}
 					Logger.warn("SharedUriHandler: Missing code parameter for Unlok callback")

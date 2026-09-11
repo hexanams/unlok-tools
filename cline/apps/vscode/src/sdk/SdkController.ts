@@ -54,6 +54,11 @@ import { ClineAccountService } from "./account-service"
 import { AuthService, LogoutReason } from "./auth-service"
 import { BUILTIN_SLASH_COMMANDS } from "./builtin-slash-commands"
 import { buildStartSessionInput, createHistoryItemFromSession } from "./cline-session-factory"
+import {
+	removeUnlokWorkspace as removeStoredUnlokWorkspace,
+	setActiveUnlokWorkspace as activateStoredUnlokWorkspace,
+} from "@/core/controller/account/unlokWorkspaces"
+import type { UnlokCallbackDetails } from "@/sdk/auth-service"
 import { MessageTranslatorState, reshapeErrorForWebview } from "./message-translator"
 import { createProviderCatalog } from "./model-catalog/catalog"
 import type { Disposable, ProviderCatalog, ProviderConfigChange, ProviderConfigStore } from "./model-catalog/contracts"
@@ -1972,9 +1977,24 @@ export class Controller {
 		await this.postStateToWebview()
 	}
 
-	async handleUnlokCallback(code: string, name?: string): Promise<void> {
-		await this.authService.handleUnlokCallback(code, name)
+	async handleUnlokCallback(code: string, details?: UnlokCallbackDetails): Promise<void> {
+		await this.authService.handleUnlokCallback(code, details)
 		this.persistProviderApiKeyFromState("unlok")
+		await this.postStateToWebview()
+	}
+
+	/** Switch chat to another connected Unlok workspace (see unlokWorkspaces.ts). */
+	async setActiveUnlokWorkspace(id: string): Promise<void> {
+		if (activateStoredUnlokWorkspace(this.stateManager, id)) {
+			this.persistProviderApiKeyFromState("unlok")
+		}
+		await this.postStateToWebview()
+	}
+
+	async removeUnlokWorkspace(id: string): Promise<void> {
+		if (removeStoredUnlokWorkspace(this.stateManager, id)) {
+			this.persistProviderApiKeyFromState("unlok")
+		}
 		await this.postStateToWebview()
 	}
 

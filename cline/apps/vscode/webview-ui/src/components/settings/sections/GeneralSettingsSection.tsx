@@ -1,4 +1,5 @@
-import { VSCodeCheckbox, VSCodeLink } from "@vscode/webview-ui-toolkit/react"
+import { VSCodeButton, VSCodeCheckbox } from "@vscode/webview-ui-toolkit/react"
+import { unlokWorkspaceLabel } from "@/components/account/UnlokAccountView"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import PreferredLanguageSetting from "../PreferredLanguageSetting"
@@ -7,15 +8,32 @@ import { updateSetting } from "../utils/settingsHandlers"
 
 interface GeneralSettingsSectionProps {
 	renderSectionHeader: (tabId: string) => JSX.Element | null
+	/** Jumps to the Account tab, where the full workspace list lives. */
+	onOpenAccountTab?: () => void
 }
 
-const GeneralSettingsSection = ({ renderSectionHeader }: GeneralSettingsSectionProps) => {
-	const { telemetrySetting, remoteConfigSettings } = useExtensionState()
+const GeneralSettingsSection = ({ renderSectionHeader, onOpenAccountTab }: GeneralSettingsSectionProps) => {
+	const { telemetrySetting, remoteConfigSettings, unlokWorkspaces } = useExtensionState()
+	const activeWorkspace = unlokWorkspaces?.find((w) => w.active)
 
 	return (
 		<div>
 			{renderSectionHeader("general")}
 			<Section>
+				{activeWorkspace && (
+					<div className="mb-5 flex items-center justify-between gap-3 rounded-md border border-editor-widget-border/50 p-3">
+						<div className="flex min-w-0 flex-col">
+							<span className="text-xs font-medium uppercase tracking-wider text-foreground/80">Active workspace</span>
+							<span className="truncate text-sm">{unlokWorkspaceLabel(activeWorkspace)}</span>
+							{activeWorkspace.email && (
+								<span className="truncate text-description text-xs">{activeWorkspace.email}</span>
+							)}
+						</div>
+						<VSCodeButton appearance="secondary" onClick={onOpenAccountTab}>
+							Manage workspaces
+						</VSCodeButton>
+					</div>
+				)}
 				<PreferredLanguageSetting />
 
 				<div className="mb-[5px]">
@@ -42,22 +60,8 @@ const GeneralSettingsSection = ({ renderSectionHeader }: GeneralSettingsSectionP
 					</Tooltip>
 
 					<p className="text-sm mt-[5px] text-description">
-						Help improve Cline by sending usage data and error reports. No code, prompts, or personal information are
-						ever sent. See our{" "}
-						<VSCodeLink
-							className="text-inherit"
-							href="https://docs.cline.bot/more-info/telemetry"
-							style={{ fontSize: "inherit", textDecoration: "underline" }}>
-							telemetry overview
-						</VSCodeLink>{" "}
-						and{" "}
-						<VSCodeLink
-							className="text-inherit"
-							href="https://cline.bot/privacy"
-							style={{ fontSize: "inherit", textDecoration: "underline" }}>
-							privacy policy
-						</VSCodeLink>{" "}
-						for more details.
+						Help improve Unlok by sending usage data and error reports. No code, prompts, or personal information are
+						ever sent.
 					</p>
 				</div>
 			</Section>

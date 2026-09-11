@@ -1,4 +1,5 @@
 // Extracted from classic src/core/controller/index.ts (see origin/main)
+import { summarizeUnlokWorkspaces } from "@core/controller/account/unlokWorkspaces"
 //
 // Standalone function to build ExtensionState from a Controller instance.
 // This allows the SdkController to reuse the classic state-building logic
@@ -37,6 +38,7 @@ export async function getStateToPostToWebview(controller: {
 	// Get API configuration from cache for immediate access
 	const onboardingModels = getClineOnboardingModels()
 	const apiConfiguration = stateManager.getApiConfiguration()
+	const unlokWorkspaces = summarizeUnlokWorkspaces(stateManager)
 	const lastShownAnnouncementId = stateManager.getGlobalStateKey("lastShownAnnouncementId")
 	const taskHistory = stateManager.getGlobalStateKey("taskHistory")
 	const autoApprovalSettings = stateManager.getGlobalSettingsKey("autoApprovalSettings")
@@ -114,6 +116,7 @@ export async function getStateToPostToWebview(controller: {
 		version,
 		extensionVariant: getExtensionVariant(),
 		apiConfiguration,
+		unlokWorkspaces,
 		currentTaskItem,
 		clineMessages,
 		checkpointRestoreInput,

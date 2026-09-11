@@ -36,11 +36,26 @@ export type Platform = "aix" | "darwin" | "freebsd" | "linux" | "openbsd" | "sun
 export const DEFAULT_PLATFORM = "unknown"
 
 export const COMMAND_CANCEL_TOKEN = "__cline_command_cancel__"
+/**
+ * One connected Unlok workspace as the webview sees it: never the key itself.
+ * Built by summarizeUnlokWorkspaces() on every state post.
+ */
+export interface UnlokWorkspaceSummary {
+	id: string
+	email: string
+	workspaceName: string
+	teamId: string
+	active: boolean
+	lastError: string
+	addedAt: number
+}
+
 export interface ExtensionState {
 	isNewUser: boolean
 	welcomeViewCompleted: boolean
 	onboardingModels: OnboardingModelGroup | undefined
 	apiConfiguration?: ApiConfiguration
+	unlokWorkspaces?: UnlokWorkspaceSummary[]
 	autoApprovalSettings: AutoApprovalSettings
 	browserSettings: BrowserSettings
 	remoteBrowserHost?: string
@@ -181,6 +196,8 @@ export interface ClineMessage {
 	say?: ClineSay
 	text?: string
 	reasoning?: string
+	/** Wall-clock seconds this reasoning block took, for the "Thought for Ns" display. Only set on the finalized (non-partial) reasoning message. */
+	reasoningDurationSeconds?: number
 	images?: string[]
 	media?: GeneratedMedia[]
 	files?: string[]
@@ -375,6 +392,20 @@ export interface ClineApiReqInfo {
 	cost?: number
 	cancelReason?: ClineApiReqCancelReason
 	streamingFailedMessage?: string
+	/** Provider-reported hidden reasoning tokens for this turn, when available. */
+	reasoningTokenCount?: number
+	/** "provider/model" that actually served this turn, from Unlok's X-Unlok-Served-By header. Unset for non-Unlok providers. */
+	servedBy?: string
+	/** Unlok's routing decision for this turn, from X-Unlok-Routing. Only present for "auto"-routed requests. */
+	routing?: {
+		policy?: string
+		heuristicTier?: string
+		finalTier?: string
+		escalated?: boolean
+		classifierCostUsd?: number
+		webSearchUsed?: boolean
+		compactionCostUsd?: number
+	}
 }
 
 /**

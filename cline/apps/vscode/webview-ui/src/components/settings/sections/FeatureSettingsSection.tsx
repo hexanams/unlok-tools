@@ -43,7 +43,7 @@ const editorFeatures: FeatureToggle[] = [
 	{
 		id: "show-feature-tips",
 		label: "Feature Tips",
-		description: "Show rotating tips during the thinking phase to help you discover Cline features.",
+		description: "Show rotating tips during the thinking phase to help you discover more features.",
 		stateKey: "showFeatureTips",
 		settingKey: "showFeatureTips",
 	},
@@ -64,7 +64,7 @@ const editorFeatures: FeatureToggle[] = [
 	{
 		id: "worktrees",
 		label: "Worktrees",
-		description: "Enables git worktree management for running parallel Cline tasks.",
+		description: "Enables git worktree management for running parallel tasks.",
 		stateKey: "worktreesEnabled",
 		settingKey: "worktreesEnabled",
 	},
@@ -136,6 +136,12 @@ interface FeatureSettingsSectionProps {
 	renderSectionHeader: (tabId: string) => JSX.Element | null
 }
 
+// Unlok hides the Agent group (Auto Compact, its strategy, Web Search) and the
+// Editor group (Feature Tips, Background Edit, Checkpoints). Their defaults
+// stay in force, people just don't get a wall of toggles. Kept as a gate
+// rather than deleting the JSX so upstream merges of this file stay clean.
+const SHOW_AGENT_AND_EDITOR_FEATURES: boolean = false
+
 const FeatureSettingsSection = ({ renderSectionHeader }: FeatureSettingsSectionProps) => {
 	const {
 		enableCheckpointsSetting,
@@ -170,67 +176,71 @@ const FeatureSettingsSection = ({ renderSectionHeader }: FeatureSettingsSectionP
 		<div className="mb-2">
 			{renderSectionHeader("features")}
 			<Section>
-				<div className="mb-5 flex flex-col gap-3">
-					{/* Core features */}
-					<div>
-						<div className="text-xs font-medium text-foreground/80 uppercase tracking-wider mb-3">Agent</div>
-						<div
-							className="relative p-3 pt-0 my-3 rounded-md border border-editor-widget-border/50"
-							id="agent-features">
-							{agentFeatures.map((feature) => (
+				{SHOW_AGENT_AND_EDITOR_FEATURES && (
+					<div className="mb-5 flex flex-col gap-3">
+						{/* Core features */}
+						<div>
+							<div className="text-xs font-medium text-foreground/80 uppercase tracking-wider mb-3">Agent</div>
+							<div
+								className="relative p-3 pt-0 my-3 rounded-md border border-editor-widget-border/50"
+								id="agent-features">
+								{agentFeatures.map((feature) => (
+									<FeatureRow
+										checked={featureState[feature.stateKey]}
+										description={feature.description}
+										isVisible={featureVisibility[feature.stateKey] ?? true}
+										key={feature.id}
+										label={feature.label}
+										onChange={(checked) => updateSetting(feature.settingKey, checked)}
+									/>
+								))}
+								<div className="space-y-2 py-3">
+									<Label className="text-sm font-medium text-foreground">Auto Compact Strategy</Label>
+									<p className="text-xs text-muted-foreground">
+										Controls how auto compaction rewrites context.
+									</p>
+									<Select
+										disabled={!useAutoCondense}
+										onValueChange={(value) => updateSetting("compactionStrategy", value)}
+										value={compactionStrategy ?? "agentic"}>
+										<SelectTrigger className="w-full">
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="basic">Basic</SelectItem>
+											<SelectItem value="agentic">Agentic</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
 								<FeatureRow
-									checked={featureState[feature.stateKey]}
-									description={feature.description}
-									isVisible={featureVisibility[feature.stateKey] ?? true}
-									key={feature.id}
-									label={feature.label}
-									onChange={(checked) => updateSetting(feature.settingKey, checked)}
+									checked={webSearchEnabled}
+									description="Let the model search the web when the selected provider and model support it. Applies to new tasks."
+									label="Web Search"
+									onChange={(checked) => updateSetting("webSearchEnabled", checked)}
 								/>
-							))}
-							<div className="space-y-2 py-3">
-								<Label className="text-sm font-medium text-foreground">Auto Compact Strategy</Label>
-								<p className="text-xs text-muted-foreground">Controls how auto compaction rewrites context.</p>
-								<Select
-									disabled={!useAutoCondense}
-									onValueChange={(value) => updateSetting("compactionStrategy", value)}
-									value={compactionStrategy ?? "agentic"}>
-									<SelectTrigger className="w-full">
-										<SelectValue />
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value="basic">Basic</SelectItem>
-										<SelectItem value="agentic">Agentic</SelectItem>
-									</SelectContent>
-								</Select>
 							</div>
-							<FeatureRow
-								checked={webSearchEnabled}
-								description="Let the model search the web when the selected provider and model support it. Applies to new tasks."
-								label="Web Search"
-								onChange={(checked) => updateSetting("webSearchEnabled", checked)}
-							/>
 						</div>
-					</div>
 
-					{/* Editor features */}
-					<div>
-						<div className="text-xs font-medium text-foreground/80 uppercase tracking-wider mb-3">Editor</div>
-						<div
-							className="relative p-3 pt-0 my-3 rounded-md border border-editor-widget-border/50"
-							id="optional-features">
-							{editorFeatures.map((feature) => (
-								<FeatureRow
-									checked={featureState[feature.stateKey]}
-									description={feature.description}
-									isVisible={featureVisibility[feature.stateKey] ?? true}
-									key={feature.id}
-									label={feature.label}
-									onChange={(checked) => updateSetting(feature.settingKey, checked)}
-								/>
-							))}
+						{/* Editor features */}
+						<div>
+							<div className="text-xs font-medium text-foreground/80 uppercase tracking-wider mb-3">Editor</div>
+							<div
+								className="relative p-3 pt-0 my-3 rounded-md border border-editor-widget-border/50"
+								id="optional-features">
+								{editorFeatures.map((feature) => (
+									<FeatureRow
+										checked={featureState[feature.stateKey]}
+										description={feature.description}
+										isVisible={featureVisibility[feature.stateKey] ?? true}
+										key={feature.id}
+										label={feature.label}
+										onChange={(checked) => updateSetting(feature.settingKey, checked)}
+									/>
+								))}
+							</div>
 						</div>
 					</div>
-				</div>
+				)}
 
 				{/* Advanced */}
 				<div>

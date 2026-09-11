@@ -52,6 +52,12 @@ service AccountService {
   // "don't drop the user into an empty chat with no information" brief.
   rpc getUnlokWorkspaceInfo(EmptyRequest) returns (UnlokWorkspaceInfo);
 
+  // Several Unlok workspaces stay connected at once; one is active. The list
+  // itself rides on ExtensionState.unlokWorkspaces (never the keys), these two
+  // change it. The request value is the entry id.
+  rpc setActiveUnlokWorkspace(StringRequest) returns (Empty);
+  rpc removeUnlokWorkspace(StringRequest) returns (Empty);
+
   // Returns a link the webview can use to redirect back to the user's IDE.
   rpc getRedirectUrl(EmptyRequest) returns (String);
 

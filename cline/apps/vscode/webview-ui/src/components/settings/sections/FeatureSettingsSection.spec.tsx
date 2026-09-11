@@ -46,35 +46,27 @@ describe("FeatureSettingsSection", () => {
 		const agentSection = container.querySelector("#agent-features")
 
 		expect(advancedSection?.querySelector("#Hooks")).toBeTruthy()
-		expect(agentSection?.querySelector("#Hooks")).toBeNull()
+		// The Agent group is hidden entirely now, so there is no section for Hooks to be wrongly inside of.
+		expect(agentSection).toBeNull()
 	})
 
-	it("renders Feature Tips toggle in the Editor section", () => {
+	it("hides the Agent and Editor feature groups (Unlok keeps their defaults, not their toggles)", () => {
 		const { container } = render(<FeatureSettingsSection renderSectionHeader={() => null} />)
 
-		expect(screen.getByText("Feature Tips")).toBeTruthy()
-
-		const editorSection = container.querySelector("#optional-features")
-		const agentSection = container.querySelector("#agent-features")
-
-		expect(editorSection?.querySelector('[id="Feature Tips"]')).toBeTruthy()
-		expect(agentSection?.querySelector('[id="Feature Tips"]')).toBeNull()
-	})
-
-	it("renders the Auto Compact Strategy setting in the Agent section", () => {
-		const { container } = render(<FeatureSettingsSection renderSectionHeader={() => null} />)
-
-		expect(screen.getByText("Auto Compact Strategy")).toBeTruthy()
-
-		const agentSection = container.querySelector("#agent-features")
-		expect(agentSection?.textContent).toContain("Basic")
-	})
-
-	it("disables Auto Compact Strategy when Auto Compact is off", () => {
-		const { container } = render(<FeatureSettingsSection renderSectionHeader={() => null} />)
-
-		const strategySelect = container.querySelector("#agent-features button[role='combobox']")
-		expect(strategySelect).toHaveAttribute("disabled")
+		for (const label of [
+			"Auto Compact",
+			"Auto Compact Strategy",
+			"Web Search",
+			"Feature Tips",
+			"Background Edit",
+			"Checkpoints",
+		]) {
+			expect(screen.queryByText(label)).toBeNull()
+		}
+		expect(container.querySelector("#agent-features")).toBeNull()
+		expect(container.querySelector("#optional-features")).toBeNull()
+		// Advanced stays.
+		expect(container.querySelector("#advanced-features")).toBeTruthy()
 	})
 
 	it("calls updateSetting with hooksEnabled when toggled", () => {
@@ -86,16 +78,5 @@ describe("FeatureSettingsSection", () => {
 		fireEvent.click(hooksSwitch as Element)
 
 		expect(mockUpdateSetting).toHaveBeenCalledWith("hooksEnabled", true)
-	})
-
-	it("calls updateSetting with showFeatureTips when toggled", () => {
-		const { container } = render(<FeatureSettingsSection renderSectionHeader={() => null} />)
-
-		const featureTipsSwitch = container.querySelector('[id="Feature Tips"]')
-		expect(featureTipsSwitch).toBeTruthy()
-
-		fireEvent.click(featureTipsSwitch as Element)
-
-		expect(mockUpdateSetting).toHaveBeenCalledWith("showFeatureTips", true)
 	})
 })

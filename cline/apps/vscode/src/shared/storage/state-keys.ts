@@ -76,8 +76,14 @@ const GLOBAL_STATE_FIELDS = {
 	terminalReuseEnabled: { default: true as boolean },
 	vscodeTerminalExecutionMode: {
 		// Defaults only apply when no value is stored, so users who previously
-		// chose either mode keep their saved preference.
-		default: "vscodeTerminal" as "vscodeTerminal" | "backgroundExec",
+		// chose either mode keep their saved preference. Unlok defaults to
+		// backgroundExec: a real VS Code terminal opening/revealing itself on
+		// every command is disruptive, and the chat area already shows the
+		// same captured output inline (see CommandOutputRow) -- there's no
+		// loss of information, just less UI churn by default. Still fully
+		// switchable in Settings -> Terminal for anyone who wants the real
+		// terminal (e.g. to type into a running process by hand).
+		default: "backgroundExec" as "vscodeTerminal" | "backgroundExec",
 	},
 	isNewUser: { default: true as boolean },
 	welcomeViewCompleted: { default: undefined as boolean | undefined },
@@ -188,6 +194,8 @@ const API_HANDLER_SETTINGS_FIELDS = {
 	planModeAihubmixModelInfo: { default: undefined as OpenAiCompatibleModelInfo | undefined },
 	planModeHicapModelId: { default: undefined as string | undefined },
 	planModeHicapModelInfo: { default: undefined as ModelInfo | undefined },
+	planModeUnlokModelId: { default: undefined as string | undefined },
+	planModeUnlokModelInfo: { default: undefined as ModelInfo | undefined },
 	planModeNousResearchModelId: { default: undefined as string | undefined },
 	planModeVercelAiGatewayModelId: { default: undefined as string | undefined },
 	planModeVercelAiGatewayModelInfo: { default: undefined as ModelInfo | undefined },
@@ -234,6 +242,8 @@ const API_HANDLER_SETTINGS_FIELDS = {
 	actModeAihubmixModelInfo: { default: undefined as OpenAiCompatibleModelInfo | undefined },
 	actModeHicapModelId: { default: undefined as string | undefined },
 	actModeHicapModelInfo: { default: undefined as ModelInfo | undefined },
+	actModeUnlokModelId: { default: undefined as string | undefined },
+	actModeUnlokModelInfo: { default: undefined as ModelInfo | undefined },
 	actModeNousResearchModelId: { default: undefined as string | undefined },
 	actModeVercelAiGatewayModelId: { default: undefined as string | undefined },
 	actModeVercelAiGatewayModelInfo: { default: undefined as ModelInfo | undefined },
@@ -349,6 +359,11 @@ const SECRETS_KEYS = [
 	"difyApiKey",
 	"minimaxApiKey",
 	"hicapApiKey",
+	"unlokApiKey",
+	// JSON list of every Unlok workspace connected in this editor plus which
+	// one is active; unlokApiKey above always mirrors the active entry's key.
+	// See src/core/controller/account/unlokWorkspaces.ts.
+	"unlokWorkspaces",
 	"aihubmixApiKey",
 	"nousResearchApiKey",
 	"remoteLiteLlmApiKey",
