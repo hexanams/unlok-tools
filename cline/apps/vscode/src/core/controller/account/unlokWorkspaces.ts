@@ -65,6 +65,52 @@ function parse(raw: string | undefined): StoredUnlokWorkspaces {
 	}
 }
 
+function isGenericLabel(workspace: StoredUnlokWorkspace): boolean {
+	return workspace.workspaceName === FALLBACK_WORKSPACE_NAME && workspace.email === ""
+}
+
+/**
+ * Two entries can never share a key. An earlier version adopted the mirrored
+ * key as a generic "Workspace" entry during the sign in callback, right
+ * before the real, named entry for the same key was added, so every sign in
+ * left a duplicate behind, and a later reconnect left the duplicate holding
+ * a key the backend had since revoked. Collapse them: the named entry wins,
+ * the active pointer follows it, and nothing else changes.
+ */
+function dedupeByKey(data: StoredUnlokWorkspaces): boolean {
+	const keptByKey = new Map<string, StoredUnlokWorkspace>()
+	const dropped = new Map<string, string>()
+	for (const workspace of data.workspaces) {
+		if (!workspace.apiKey) {
+			dropped.set(workspace.id, "")
+			continue
+		}
+		const kept = keptByKey.get(workspace.apiKey)
+		if (!kept) {
+			keptByKey.set(workspace.apiKey, workspace)
+			continue
+		}
+		if (isGenericLabel(kept) && !isGenericLabel(workspace)) {
+			keptByKey.set(workspace.apiKey, workspace)
+			dropped.set(kept.id, workspace.id)
+		} else {
+			if (!kept.email && workspace.email) {
+				kept.email = workspace.email
+			}
+			dropped.set(workspace.id, kept.id)
+		}
+	}
+	if (dropped.size === 0) {
+		return false
+	}
+	data.workspaces = data.workspaces.filter((w) => !dropped.has(w.id))
+	const redirected = dropped.get(data.activeId)
+	if (redirected !== undefined) {
+		data.activeId = redirected
+	}
+	return true
+}
+
 function persist(store: UnlokWorkspaceStore, data: StoredUnlokWorkspaces): void {
 	store.setSecret("unlokWorkspaces", data.workspaces.length > 0 ? JSON.stringify(data) : undefined)
 	const active = data.workspaces.find((w) => w.id === data.activeId)
@@ -88,8 +134,13 @@ function persist(store: UnlokWorkspaceStore, data: StoredUnlokWorkspaces): void 
  */
 export function loadUnlokWorkspaces(store: UnlokWorkspaceStore): StoredUnlokWorkspaces {
 	const data = parse(store.getSecretKey("unlokWorkspaces"))
+	const deduped = dedupeByKey(data)
 	const mirroredKey = store.getApiConfiguration().unlokApiKey ?? ""
 	const active = data.workspaces.find((w) => w.id === data.activeId)
+
+	if (deduped) {
+		store.setSecret("unlokWorkspaces", JSON.stringify(data))
+	}
 
 	if (mirroredKey && active?.apiKey === mirroredKey) {
 		return data
@@ -129,14 +180,19 @@ export function loadUnlokWorkspaces(store: UnlokWorkspaceStore): StoredUnlokWork
 export function addOrReplaceUnlokWorkspace(store: UnlokWorkspaceStore, fresh: NewUnlokWorkspace): StoredUnlokWorkspace {
 	const data = loadUnlokWorkspaces(store)
 	const workspaceName = fresh.workspaceName.trim() || (fresh.teamId ? FALLBACK_WORKSPACE_NAME : "Personal")
-	const existing = data.workspaces.find(
-		(w) => w.teamId === fresh.teamId && (fresh.email ? w.email === fresh.email : w.email === ""),
-	)
+	// Same key first: load() may already have adopted this exact key from the
+	// mirror as a generic entry, and that entry must become the named one
+	// rather than sit next to it. Then same account and workspace, which is
+	// the reconnect case (new key, same place).
+	const existing =
+		data.workspaces.find((w) => w.apiKey === fresh.apiKey) ??
+		data.workspaces.find((w) => w.teamId === fresh.teamId && (fresh.email ? w.email === fresh.email : w.email === ""))
 	let entry: StoredUnlokWorkspace
 	if (existing) {
 		existing.apiKey = fresh.apiKey
 		existing.email = fresh.email || existing.email
 		existing.workspaceName = workspaceName
+		existing.teamId = fresh.teamId
 		existing.lastError = ""
 		entry = existing
 	} else {
@@ -201,18 +257,41 @@ export function clearUnlokWorkspaceError(store: UnlokWorkspaceStore): void {
 	persist(store, data)
 }
 
-/** Fills in the email of the active entry once GET /v1/me has answered. */
-export function backfillUnlokWorkspaceEmail(store: UnlokWorkspaceStore, email: string): void {
-	if (!email) {
-		return
-	}
+export interface UnlokWorkspaceIdentity {
+	email: string
+	/** "" for personal. */
+	teamId: string
+	workspaceName: string
+}
+
+/**
+ * Once GET /v1/me has answered for the active entry, fill in whatever the
+ * entry is missing. An entry adopted from a pasted key, or from the single
+ * key that predates this list, starts with no email and the generic name;
+ * the backend knows which workspace the key really belongs to.
+ */
+export function backfillUnlokWorkspaceIdentity(store: UnlokWorkspaceStore, identity: UnlokWorkspaceIdentity): void {
 	const data = loadUnlokWorkspaces(store)
 	const active = data.workspaces.find((w) => w.id === data.activeId)
-	if (!active || active.email === email) {
+	if (!active) {
 		return
 	}
-	active.email = email
-	persist(store, data)
+	let changed = false
+	if (identity.email && active.email !== identity.email) {
+		active.email = identity.email
+		changed = true
+	}
+	if (active.workspaceName === FALLBACK_WORKSPACE_NAME || !active.workspaceName) {
+		const name = identity.workspaceName.trim() || (identity.teamId ? FALLBACK_WORKSPACE_NAME : "Personal")
+		if (name !== active.workspaceName || active.teamId !== identity.teamId) {
+			active.workspaceName = name
+			active.teamId = identity.teamId
+			changed = true
+		}
+	}
+	if (changed) {
+		persist(store, data)
+	}
 }
 
 /** What the webview gets: every field except the key. */

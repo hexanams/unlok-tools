@@ -1214,16 +1214,18 @@ export class AuthService {
 	 */
 	async handleUnlokCallback(code: string, details?: UnlokCallbackDetails): Promise<void> {
 		this._unlokUserName = details?.name
-		this.setProviderApiKey("unlok", "unlokApiKey", code)
-		// Keep the connection in the multi workspace list too (and make it the
-		// active one). Same account and workspace already listed means the key
-		// is replaced in place, so a reconnect never duplicates a row.
+		// List first: it mirrors the new key into unlokApiKey itself. Writing
+		// the mirror before the list made load() adopt the key as a generic
+		// "Workspace" entry a moment before the named one was added, leaving a
+		// duplicate per sign in. Same account and workspace already listed
+		// means the key is replaced in place, so a reconnect never duplicates.
 		addOrReplaceUnlokWorkspace(StateManager.get(), {
 			apiKey: code,
 			email: details?.email ?? "",
 			workspaceName: details?.workspaceName ?? "",
 			teamId: details?.teamId ?? "",
 		})
+		this.setProviderApiKey("unlok", "unlokApiKey", code)
 	}
 
 	/**

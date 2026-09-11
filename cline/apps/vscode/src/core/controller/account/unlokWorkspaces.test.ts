@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
 	addOrReplaceUnlokWorkspace,
-	backfillUnlokWorkspaceEmail,
+	backfillUnlokWorkspaceIdentity,
 	clearUnlokWorkspaceError,
 	loadUnlokWorkspaces,
 	markUnlokWorkspaceError,
@@ -86,8 +86,69 @@ describe("unlokWorkspaces", () => {
 		expect(data.workspaces).toHaveLength(1)
 		expect(data.workspaces[0].apiKey).toBe("unlok_sk_pasted")
 		expect(data.activeId).toBe(data.workspaces[0].id)
-		backfillUnlokWorkspaceEmail(store, "me@acme.dev")
-		expect(summarizeUnlokWorkspaces(store)[0].email).toBe("me@acme.dev")
+		backfillUnlokWorkspaceIdentity(store, { email: "me@acme.dev", teamId: "", workspaceName: "Personal" })
+		expect(summarizeUnlokWorkspaces(store)[0]).toEqual(
+			expect.objectContaining({ email: "me@acme.dev", workspaceName: "Personal", teamId: "" }),
+		)
+	})
+
+	it("does not duplicate a key the mirror already carries when the named entry arrives a moment later", () => {
+		// The old callback order: provider mirror written first, then the list.
+		const { store } = fakeStore({ unlokApiKey: "unlok_sk_team" })
+		addOrReplaceUnlokWorkspace(store, team)
+		const summaries = summarizeUnlokWorkspaces(store)
+		expect(summaries).toHaveLength(1)
+		expect(summaries[0]).toEqual(expect.objectContaining({ workspaceName: "Acme Engineering", active: true }))
+	})
+
+	it("collapses legacy duplicates that share a key, keeping the named entry and the active pointer", () => {
+		const legacy = {
+			activeId: "generic-2",
+			workspaces: [
+				{
+					id: "generic-1",
+					apiKey: "k-old",
+					email: "",
+					workspaceName: "Workspace",
+					teamId: "",
+					addedAt: 1,
+					lastError: "",
+				},
+				{
+					id: "generic-2",
+					apiKey: "k-team",
+					email: "",
+					workspaceName: "Workspace",
+					teamId: "",
+					addedAt: 2,
+					lastError: "",
+				},
+				{
+					id: "named",
+					apiKey: "k-team",
+					email: "me@acme.dev",
+					workspaceName: "Acme Engineering",
+					teamId: "t1",
+					addedAt: 3,
+					lastError: "",
+				},
+			],
+		}
+		const { store, config } = fakeStore({ unlokApiKey: "k-team", unlokWorkspaces: JSON.stringify(legacy) })
+		const summaries = summarizeUnlokWorkspaces(store)
+		expect(summaries.map((w) => [w.workspaceName, w.active])).toEqual([
+			["Workspace", false],
+			["Acme Engineering", true],
+		])
+		expect(config().unlokApiKey).toBe("k-team")
+	})
+
+	it("names an adopted entry after the workspace /v1/me reports, but never renames one that already has a real name", () => {
+		const { store } = fakeStore({ unlokApiKey: "k-adopted" })
+		backfillUnlokWorkspaceIdentity(store, { email: "me@acme.dev", teamId: "t9", workspaceName: "Ops" })
+		expect(summarizeUnlokWorkspaces(store)[0]).toEqual(expect.objectContaining({ workspaceName: "Ops", teamId: "t9" }))
+		backfillUnlokWorkspaceIdentity(store, { email: "me@acme.dev", teamId: "", workspaceName: "Personal" })
+		expect(summarizeUnlokWorkspaces(store)[0].workspaceName).toBe("Ops")
 	})
 
 	it("records a failure on the active workspace and clears it on success, never exposing keys to the webview", () => {
