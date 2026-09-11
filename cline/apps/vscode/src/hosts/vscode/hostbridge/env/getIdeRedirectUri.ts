@@ -1,5 +1,6 @@
 import { EmptyRequest, String } from "@shared/proto/cline/common"
 import * as vscode from "vscode"
+import { ExtensionRegistryInfo } from "@/registry"
 
 export async function getIdeRedirectUri(_: EmptyRequest): Promise<String> {
 	if (vscode.env.uiKind === vscode.UIKind.Web) {
@@ -9,5 +10,10 @@ export async function getIdeRedirectUri(_: EmptyRequest): Promise<String> {
 		return { value: "" }
 	}
 	const uriScheme = vscode.env.uriScheme || "vscode"
-	return { value: `${uriScheme}://saoudrizwan.claude-dev` }
+	// Upstream hardcoded its own marketplace id here. The auth success page
+	// redirects the browser to this URI to bring the IDE back to the front,
+	// and a deep link to an extension that isn't installed makes VS Code offer
+	// to install it: with the upstream id that was "Would you like to install
+	// 'Cline'?" after every Unlok sign in. Use this build's real id instead.
+	return { value: `${uriScheme}://${ExtensionRegistryInfo.id}` }
 }

@@ -16,7 +16,8 @@ export async function openWalkthrough(_controller: Controller, _request: EmptyRe
 	try {
 		await vscode.commands.executeCommand(
 			"workbench.action.openWalkthrough",
-			`saoudrizwan.${ExtensionRegistryInfo.name}#ClineWalkthrough`,
+			// This build's own id (publisher.name), never upstream's publisher.
+			`${ExtensionRegistryInfo.id}#ClineWalkthrough`,
 		)
 		telemetryService.captureButtonClick("webview_openWalkthrough")
 		return Empty.create({})
