@@ -5,6 +5,7 @@ import {
 	clearUnlokWorkspaceError,
 	loadUnlokWorkspaces,
 	markUnlokWorkspaceError,
+	markUnlokWorkspaceRevoked,
 	removeUnlokWorkspace,
 	setActiveUnlokWorkspace,
 	summarizeUnlokWorkspaces,
@@ -206,6 +207,24 @@ describe("unlokWorkspaces", () => {
 		expect(JSON.stringify(failing)).not.toContain("unlok_sk_")
 		clearUnlokWorkspaceError(store)
 		expect(summarizeUnlokWorkspaces(store)[0].lastError).toBe("")
+	})
+
+	it("drops a generic entry whose key is revoked and moves to the next healthy one; keeps a named one for reconnecting", () => {
+		const { store, config } = fakeStore()
+		const named = addOrReplaceUnlokWorkspace(store, team)
+		// A generic leftover holding a dead key, made active (mirror = its key).
+		const legacy = loadUnlokWorkspaces(store)
+		legacy.workspaces.push({ id: "generic", apiKey: "k-dead", email: "", workspaceName: "Workspace", teamId: "", addedAt: 9, lastError: "" })
+		legacy.activeId = "generic"
+		store.setSecret("unlokWorkspaces", JSON.stringify(legacy))
+		store.setApiConfiguration({ ...store.getApiConfiguration(), unlokApiKey: "k-dead" })
+
+		expect(markUnlokWorkspaceRevoked(store)).toBe(true)
+		expect(summarizeUnlokWorkspaces(store)).toEqual([expect.objectContaining({ id: named.id, active: true })])
+		expect(config().unlokApiKey).toBe("unlok_sk_team")
+
+		expect(markUnlokWorkspaceRevoked(store)).toBe(false)
+		expect(summarizeUnlokWorkspaces(store)[0].lastError).toContain("revoked")
 	})
 
 	it("tolerates a corrupt secret by starting over", () => {

@@ -311,9 +311,30 @@ export function backfillUnlokWorkspaceIdentity(store: UnlokWorkspaceStore, ident
 	}
 }
 
-/** GET /v1/me answered 401 for the active entry: its key is dead. */
-export function markUnlokWorkspaceRevoked(store: UnlokWorkspaceStore): void {
-	markUnlokWorkspaceError(store, "This connection was revoked. Reconnect it, or remove it.")
+/**
+ * GET /v1/me answered 401 for the active entry: its key is dead. A named
+ * entry is kept and marked so the person can reconnect it. A generic one
+ * (never identified, so nothing to reconnect by name) is just a leftover
+ * holding a dead key: it is removed, and the next healthy entry becomes
+ * active so chat keeps working instead of being stuck on a revoked key.
+ * Returns true when the active entry changed.
+ */
+export function markUnlokWorkspaceRevoked(store: UnlokWorkspaceStore): boolean {
+	const data = loadUnlokWorkspaces(store)
+	const active = data.workspaces.find((w) => w.id === data.activeId)
+	if (!active) {
+		return false
+	}
+	if (!isGenericLabel(active)) {
+		active.lastError = "This connection was revoked. Reconnect it, or remove it."
+		persist(store, data)
+		return false
+	}
+	data.workspaces = data.workspaces.filter((w) => w.id !== active.id)
+	const next = data.workspaces.find((w) => !w.lastError) ?? data.workspaces[0]
+	data.activeId = next?.id ?? ""
+	persist(store, data)
+	return true
 }
 
 /** What the webview gets: every field except the key. */

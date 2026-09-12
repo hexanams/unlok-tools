@@ -77,8 +77,10 @@ export async function getUnlokWorkspaceInfo(controller: Controller, _request: Em
 		// from another machine, or a revoke in the dashboard). Record it so the
 		// Account list shows the row as dead instead of merely "loading".
 		const status = (error as { response?: { status?: number } } | undefined)?.response?.status
-		if (status === 401) {
-			markUnlokWorkspaceRevoked(controller.stateManager)
+		if (status === 401 && markUnlokWorkspaceRevoked(controller.stateManager)) {
+			// The dead leftover was dropped and another workspace made active:
+			// tell the webview, and let the caller retry against the new one.
+			await controller.postStateToWebview()
 		}
 		Logger.error(`Failed to fetch Unlok workspace info: ${error}`)
 		throw error
