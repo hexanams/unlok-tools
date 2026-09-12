@@ -214,7 +214,15 @@ describe("unlokWorkspaces", () => {
 		const named = addOrReplaceUnlokWorkspace(store, team)
 		// A generic leftover holding a dead key, made active (mirror = its key).
 		const legacy = loadUnlokWorkspaces(store)
-		legacy.workspaces.push({ id: "generic", apiKey: "k-dead", email: "", workspaceName: "Workspace", teamId: "", addedAt: 9, lastError: "" })
+		legacy.workspaces.push({
+			id: "generic",
+			apiKey: "k-dead",
+			email: "",
+			workspaceName: "Workspace",
+			teamId: "",
+			addedAt: 9,
+			lastError: "",
+		})
 		legacy.activeId = "generic"
 		store.setSecret("unlokWorkspaces", JSON.stringify(legacy))
 		store.setApiConfiguration({ ...store.getApiConfiguration(), unlokApiKey: "k-dead" })
