@@ -130,7 +130,14 @@ export class SdkFollowupCoordinator {
 		})
 	}
 
-	/** Queue a follow-up onto a session whose turn is still running. */
+	/**
+	 * Hand a follow-up to a session whose turn is still running. Delivered as
+	 * a STEER, not a queue: the agent picks it up before its next model call
+	 * (sdk agent-runtime consumePendingUserMessage), i.e. between tool steps,
+	 * so "don't start docker" typed while the agent is working lands before
+	 * the next action instead of after the whole turn has finished. If the
+	 * turn ends first, the runtime drains it like any pending prompt.
+	 */
 	private async queueToActiveSession(
 		activeSession: NonNullable<ReturnType<SdkSessionLifecycle["getActiveSession"]>>,
 		prompt?: string,
@@ -138,11 +145,11 @@ export class SdkFollowupCoordinator {
 		files?: string[],
 	): Promise<void> {
 		const { sdkHost, sessionId } = activeSession
-		Logger.log(`[SdkController] Session is running - queuing follow-up message for session: ${sessionId}`)
+		Logger.log(`[SdkController] Session is running - steering follow-up into session: ${sessionId}`)
 
 		this.options.sessions.setRunning(true)
 		const resolvedPrompt = prompt ? await this.options.resolveContextMentions(prompt) : ""
-		this.options.sessions.fireAndForgetSend(sdkHost, sessionId, resolvedPrompt, images, files, "queue")
+		this.options.sessions.fireAndForgetSend(sdkHost, sessionId, resolvedPrompt, images, files, "steer")
 	}
 
 	/**

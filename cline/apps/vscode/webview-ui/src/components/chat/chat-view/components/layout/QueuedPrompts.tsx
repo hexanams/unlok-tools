@@ -19,12 +19,16 @@ function queueSummary(items: QueuedPrompt[]): string {
 	const steerCount = items.filter((item) => item.delivery === "steer").length
 	const queueCount = items.length - steerCount
 	if (steerCount === 0) {
-		return items.length === 1 ? "Queued message" : `${items.length} queued messages`
+		return items.length === 1
+			? "Message waiting for this turn to end"
+			: `${items.length} messages waiting for this turn to end`
 	}
 	if (queueCount === 0) {
-		return items.length === 1 ? "Steering message" : `${items.length} steering messages`
+		return items.length === 1
+			? "Sent to the running task. It applies at the next step."
+			: `${items.length} messages sent to the running task. They apply at the next step.`
 	}
-	return `${queueCount} queued, ${steerCount} steering`
+	return `${steerCount} applying at the next step, ${queueCount} waiting for this turn to end`
 }
 
 interface QueuedPromptsProps {
