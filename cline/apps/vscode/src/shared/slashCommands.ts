@@ -32,6 +32,12 @@ export const BASE_SLASH_COMMANDS: SlashCommand[] = [
 	// expansions are ported to the SDK runtime — without expansion the literal
 	// command text reaches the model, which silently degrades to plain chat.
 	{
+		name: "init",
+		description: "Sets this repository up for Unlok (UNLOK.md and .unlok) and drafts UNLOK.md",
+		section: "default",
+		cliCompatible: true,
+	},
+	{
 		name: "remember",
 		description: "Saves what follows as a fact in this workspace's memory bank",
 		section: "default",

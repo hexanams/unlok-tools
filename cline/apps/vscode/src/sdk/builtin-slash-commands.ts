@@ -95,7 +95,22 @@ Below is the user's input when they indicated that they wanted to create a compr
  * SdkController.resolveSlashCommands. Declared as kind "skill" so the
  * workflow enable/disable toggles never apply to them.
  */
+/**
+ * `/init`: what the agent does right after a repository has been set up for
+ * Unlok (UNLOK.md and .unlok/ scaffolded by UnlokProjectCoordinator). The
+ * chat shows only "/init"; the model receives these instructions.
+ */
+export const UNLOK_INIT_INSTRUCTIONS = `<explicit_instructions type="init">
+This repository was just set up for Unlok. Read it (README, manifests, folder layout, any existing docs) and rewrite UNLOK.md so a new contributor learns: what the project is, how to install, run and test it, the conventions that are not obvious from the code, and where things live. Keep it under 120 lines, plain language, no marketing. If .unlok/rules/ has rule files, leave them as they are. Do not change anything else. When UNLOK.md is written, finish with a two-line summary of what it covers.
+</explicit_instructions>`
+
 export const BUILTIN_SLASH_COMMANDS: AvailableRuntimeCommand[] = [
+	{
+		id: "builtin:init",
+		name: "init",
+		instructions: UNLOK_INIT_INSTRUCTIONS,
+		kind: "skill",
+	},
 	{
 		id: "builtin:deep-planning",
 		name: "deep-planning",

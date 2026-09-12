@@ -180,6 +180,17 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 			// with a fresh, summarized context) without the legacy new_task tool.
 			// With no active task there is nothing to compact, so fall through to
 			// normal new-task handling.
+			// "/init": scaffold UNLOK.md and .unlok in the open folder, then the
+			// host sends the drafting turn itself. Works with or without a task.
+			if (/^\/init$/.test(messageToSend.trim())) {
+				setInputValue("")
+				setActiveQuote(null)
+				await AccountServiceClient.initializeUnlokProject(EmptyRequest.create()).catch((err) =>
+					console.error("Failed to initialize the repository for Unlok:", err),
+				)
+				return
+			}
+
 			// "/remember <fact>": saved to the workspace's memory bank, never sent
 			// to the model. The confirmation arrives as an info row from the host.
 			const rememberCommand = /^\/remember(?:\s+([\s\S]+))?$/.exec(messageToSend.trim())

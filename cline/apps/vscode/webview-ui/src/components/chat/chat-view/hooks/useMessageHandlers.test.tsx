@@ -11,10 +11,12 @@ const condense = vi.fn().mockResolvedValue(undefined)
 const trackIntent = vi.fn().mockResolvedValue(undefined)
 const generatePlan = vi.fn().mockResolvedValue(undefined)
 const rememberUnlokFact = vi.fn().mockResolvedValue({ value: "Use bun" })
+const initializeUnlokProject = vi.fn().mockResolvedValue(undefined)
 
 vi.mock("@/services/grpc-client", () => ({
 	AccountServiceClient: {
 		rememberUnlokFact: (req: unknown) => rememberUnlokFact(req),
+		initializeUnlokProject: (req: unknown) => initializeUnlokProject(req),
 	},
 	TaskServiceClient: {
 		newTask: (req: unknown) => newTask(req),
@@ -154,6 +156,19 @@ describe("useMessageHandlers — send routing", () => {
 
 		expect(condense).toHaveBeenCalledTimes(1)
 		expect(condense).toHaveBeenCalledWith(expect.objectContaining({ value: "compact keep the migration numbers" }))
+		expect(newTask).not.toHaveBeenCalled()
+	})
+
+	it("runs /init through the host instead of sending it to the model", async () => {
+		mockTurnState = { phase: "completed", seq: 7 }
+		const { result } = renderHook(() => useMessageHandlers(completedConversation, makeChatState(completedConversation)))
+
+		await act(async () => {
+			await result.current.handleSendMessage("/init", [], [])
+		})
+
+		expect(initializeUnlokProject).toHaveBeenCalledTimes(1)
+		expect(askResponse).not.toHaveBeenCalled()
 		expect(newTask).not.toHaveBeenCalled()
 	})
 

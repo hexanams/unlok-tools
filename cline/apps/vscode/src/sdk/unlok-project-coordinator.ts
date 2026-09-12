@@ -27,10 +27,12 @@ export type UnlokProjectCard =
 	| { kind: "binding"; root: string; teamId: string; workspaceName: string; activeWorkspaceName: string }
 	| { kind: "initialized"; root: string; created: string[]; movedLegacy: number }
 
-export const UNLOK_INIT_PROMPT = [
-	"This repository was just set up for Unlok. Read it (its README, manifests, folder layout and any existing docs) and rewrite UNLOK.md so it tells a new contributor what the project is, how to install, run and test it, the conventions that are not obvious from the code, and where things live. Keep it under 120 lines, plain language, no marketing.",
-	"If .unlok/rules/ has rule files, leave them as they are. Do not touch anything else.",
-].join(" ")
+/**
+ * The follow-up sent after scaffolding. It is a builtin slash command
+ * (src/sdk/builtin-slash-commands.ts), so the chat shows "/init" and the
+ * model receives the drafting instructions.
+ */
+export const UNLOK_INIT_COMMAND = "/init"
 
 export interface UnlokProjectCoordinatorOptions {
 	stateManager: StateManager
@@ -164,7 +166,7 @@ export class UnlokProjectCoordinator {
 		this.emitCard({ kind: "initialized", root, created: result.created, movedLegacy: moved.length }, sessionId)
 		await this.options.postStateToWebview()
 		try {
-			await this.options.sendFollowup(UNLOK_INIT_PROMPT)
+			await this.options.sendFollowup(UNLOK_INIT_COMMAND)
 		} catch (error) {
 			Logger.warn("[UnlokProject] Could not start the UNLOK.md drafting turn:", error)
 		}

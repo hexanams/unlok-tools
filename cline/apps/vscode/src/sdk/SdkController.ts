@@ -677,7 +677,13 @@ export class Controller {
 			messages: this.messages,
 			getWorkspaceRoot: () => this.getWorkspaceRoot(),
 			postStateToWebview: () => this.postStateToWebview(),
-			sendFollowup: (prompt) => this.askResponse(prompt),
+			sendFollowup: async (prompt) => {
+				if (this.sessions.getActiveSession() || this.task) {
+					await this.askResponse(prompt)
+				} else {
+					await this.initTask(prompt)
+				}
+			},
 		})
 		this.unlokSessionCloser = new UnlokSessionCloser({
 			getApiKey: () => {
