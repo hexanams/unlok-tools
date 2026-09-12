@@ -1,11 +1,18 @@
 import type { ClineMessage } from "@shared/ExtensionMessage"
 import { EmptyRequest, StringRequest } from "@shared/proto/cline/common"
+import { AskOptimusRequest } from "@shared/proto/cline/optimus"
 import { GeneratePlanRequest } from "@shared/proto/cline/plan"
 import { AskResponseRequest, NewTaskRequest } from "@shared/proto/cline/task"
 import { IntentEvent } from "@shared/proto/cline/ui"
 import { useCallback, useRef } from "react"
 import { useExtensionState } from "@/context/ExtensionStateContext"
-import { PlanServiceClient, SlashServiceClient, TaskServiceClient, UiServiceClient } from "@/services/grpc-client"
+import {
+	OptimusServiceClient,
+	PlanServiceClient,
+	SlashServiceClient,
+	TaskServiceClient,
+	UiServiceClient,
+} from "@/services/grpc-client"
 import type { ButtonActionType } from "../shared/buttonConfig"
 import type { ChatState, MessageHandlers } from "../types/chatTypes"
 
@@ -53,6 +60,8 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 		planRoutingPolicy,
 		setPlanGenerating,
 		setPlanGenerationError,
+		isOptimusMode,
+		setIsOptimusMode,
 	} = chatState
 	const cancelInFlightRef = useRef(false)
 	const pendingResponseIdRef = useRef(0)
@@ -78,6 +87,49 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 				setActiveQuote(null)
 				await TaskServiceClient.clearTask({}).catch((err) => console.error("Failed to clear task:", err))
 				navigateToChat()
+				return
+			}
+
+			// /optimus <question> -- answered from the signed-in Unlok
+			// account's (or pooled team's) already-digested memory bank, never
+			// expanded into the model's prompt like a normal chat turn. Works
+			// with or without an active task (messages.length check omitted on
+			// purpose, unlike /compact below): this is a standalone lookup, not
+			// something that acts on the current conversation. The answer is
+			// pushed into the chat view by the controller itself -- fed into
+			// the live task as a real turn if one is running, or shown as an
+			// info note otherwise (see optimus/askOptimus.ts) -- so nothing
+			// else here needs to render the response.
+			if (messageToSend === "/optimus" || messageToSend.startsWith("/optimus ")) {
+				const question = messageToSend.slice("/optimus".length).trim()
+				setInputValue("")
+				setActiveQuote(null)
+
+				// No question text -- toggle Optimus mode rather than send a
+				// malformed one-shot ask. Toggling never asks anything itself,
+				// it only changes how the *next* plain message gets routed.
+				if (!question) {
+					setIsOptimusMode((prev) => !prev)
+					return
+				}
+
+				await OptimusServiceClient.askOptimus(AskOptimusRequest.create({ question })).catch((err) =>
+					console.error("Failed to ask Optimus:", err),
+				)
+				reengageAutoScrollBriefly(chatState)
+				return
+			}
+
+			// Optimus mode: a plain (non-"/"-prefixed, already handled by the
+			// branches above) message is a question, not a task instruction,
+			// until /optimus is typed again to turn it off.
+			if (isOptimusMode && messageToSend && !messageToSend.startsWith("/")) {
+				setInputValue("")
+				setActiveQuote(null)
+				await OptimusServiceClient.askOptimus(AskOptimusRequest.create({ question: messageToSend })).catch((err) =>
+					console.error("Failed to ask Optimus:", err),
+				)
+				reengageAutoScrollBriefly(chatState)
 				return
 			}
 

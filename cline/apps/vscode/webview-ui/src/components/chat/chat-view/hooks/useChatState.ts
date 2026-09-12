@@ -26,6 +26,7 @@ export function useChatState(messages: ClineMessage[]): ChatState {
 	const [planRoutingPolicy, setPlanRoutingPolicy] = useState("balanced")
 	const [planGenerating, setPlanGenerating] = useState(false)
 	const [planGenerationError, setPlanGenerationError] = useState<string | null>(null)
+	const [isOptimusMode, setIsOptimusMode] = useState(false)
 
 	// Refs
 	const textAreaRef = useRef<HTMLTextAreaElement>(null)
@@ -93,6 +94,8 @@ export function useChatState(messages: ClineMessage[]): ChatState {
 		setPlanGenerating,
 		planGenerationError,
 		setPlanGenerationError,
+		isOptimusMode,
+		setIsOptimusMode,
 
 		// Refs
 		textAreaRef,

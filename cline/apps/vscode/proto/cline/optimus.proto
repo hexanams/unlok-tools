@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package cline;
+
+import "cline/common.proto";
+
+option go_package = "github.com/cline/grpc-go/cline";
+option java_multiple_files = true;
+option java_package = "bot.cline.proto";
+
+// Service for Unlok's Optimus Q&A: ask a question against the
+// account's (or, when the account's role grants it, the pooled team's)
+// already-digested memory bank. Calls the same backend endpoint
+// (POST /v1/optimus/{user_id}) the Unlok Browser Agent's own
+// /optimus command uses -- see askOptimus.ts for the call shape. No
+// streaming: one question in, one answer back.
+service OptimusService {
+  rpc askOptimus(AskOptimusRequest) returns (OptimusAnswer);
+}
+
+message AskOptimusRequest {
+  Metadata metadata = 1;
+  string question = 2;
+}
+
+message OptimusAnswer {
+  string answer = 1;
+  int32 memories_considered = 2;
+  bool from_cached_digest = 3;
+}

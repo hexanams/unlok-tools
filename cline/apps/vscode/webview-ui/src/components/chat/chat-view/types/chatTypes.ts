@@ -69,6 +69,11 @@ export interface ChatState {
 	setPlanGenerating: React.Dispatch<React.SetStateAction<boolean>>
 	planGenerationError: string | null
 	setPlanGenerationError: React.Dispatch<React.SetStateAction<string | null>>
+	// Toggled by sending "/optimus" with no question (see useMessageHandlers'
+	// handleSendMessage). While on, a plain message is routed to Optimus
+	// instead of the running task -- local UI state, mirrors planModeSelected.
+	isOptimusMode: boolean
+	setIsOptimusMode: React.Dispatch<React.SetStateAction<boolean>>
 
 	// Refs
 	textAreaRef: React.RefObject<HTMLTextAreaElement>

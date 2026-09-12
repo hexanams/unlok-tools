@@ -1,5 +1,6 @@
 import React from "react"
 import ChatTextArea from "@/components/chat/ChatTextArea"
+import OptimusModeBanner from "@/components/chat/OptimusModeBanner"
 import QuotedMessagePreview from "@/components/chat/QuotedMessagePreview"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { ChatState, MessageHandlers, ScrollBehavior } from "../../types/chatTypes"
@@ -50,6 +51,8 @@ export const InputSection: React.FC<InputSectionProps> = ({
 		setPlanModeSelected,
 		planRoutingPolicy,
 		setPlanRoutingPolicy,
+		isOptimusMode,
+		setIsOptimusMode,
 	} = chatState
 
 	const { isAtBottom, scrollToBottomAuto } = scrollBehavior
@@ -69,6 +72,12 @@ export const InputSection: React.FC<InputSectionProps> = ({
 						onDismiss={() => setActiveQuote(null)}
 						text={activeQuote}
 					/>
+				</div>
+			)}
+
+			{isOptimusMode && (
+				<div style={{ marginBottom: "6px", marginTop: "10px" }}>
+					<OptimusModeBanner onExit={() => setIsOptimusMode(false)} />
 				</div>
 			)}
 

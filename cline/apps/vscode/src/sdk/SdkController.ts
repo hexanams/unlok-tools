@@ -1178,7 +1178,7 @@ export class Controller {
 	 * the same mechanism hooks already use to show host-originated messages
 	 * (see hooks-adapter.ts's emitHookMessage? calls), exposed here as a
 	 * standalone method for callers with no hook context, like the
-	 * /company-memory command's answer (companyMemory/ask.ts).
+	 * /optimus command's answer (optimus/askOptimus.ts).
 	 */
 	postInfoMessage(text: string): void {
 		this.messages.emitHookMessage({
