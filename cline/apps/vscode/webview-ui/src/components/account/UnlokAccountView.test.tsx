@@ -28,9 +28,33 @@ vi.mock("@/services/grpc-client", () => ({
 const state = vi.hoisted(() => ({
 	value: {
 		unlokWorkspaces: [
-			{ id: "ws-team", email: "me@acme.dev", workspaceName: "Acme Engineering", teamId: "t1", active: true, lastError: "", addedAt: 1 },
-			{ id: "ws-personal", email: "me@acme.dev", workspaceName: "Personal", teamId: "", active: false, lastError: "", addedAt: 2 },
-			{ id: "ws-side", email: "me@gmail.com", workspaceName: "Side project", teamId: "", active: false, lastError: "401", addedAt: 3 },
+			{
+				id: "ws-team",
+				email: "me@acme.dev",
+				workspaceName: "Acme Engineering",
+				teamId: "t1",
+				active: true,
+				lastError: "",
+				addedAt: 1,
+			},
+			{
+				id: "ws-personal",
+				email: "me@acme.dev",
+				workspaceName: "Personal",
+				teamId: "",
+				active: false,
+				lastError: "",
+				addedAt: 2,
+			},
+			{
+				id: "ws-side",
+				email: "me@gmail.com",
+				workspaceName: "Side project",
+				teamId: "",
+				active: false,
+				lastError: "401",
+				addedAt: 3,
+			},
 		],
 	},
 }))
@@ -60,6 +84,14 @@ describe("UnlokAccountView", () => {
 		const [usePersonal] = screen.getAllByText("Use this workspace")
 		fireEvent.click(usePersonal)
 		expect(setActiveMock).toHaveBeenCalledWith(expect.objectContaining({ value: "ws-personal" }))
+	})
+
+	it("says a switch ends the open session when a task is active", () => {
+		state.value = { ...state.value, currentTaskItem: { id: "t1" } } as typeof state.value
+		render(<UnlokAccountView />)
+		expect(screen.getAllByText("End session and use this workspace").length).toBeGreaterThan(0)
+		expect(screen.getByText(/Switching workspaces ends it/)).toBeTruthy()
+		state.value = { ...state.value, currentTaskItem: undefined } as typeof state.value
 	})
 
 	it("removes a workspace by id and adds one through the Unlok sign in", () => {

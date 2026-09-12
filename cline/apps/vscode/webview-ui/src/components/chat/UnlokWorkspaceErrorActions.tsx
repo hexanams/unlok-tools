@@ -36,6 +36,7 @@ export const UnlokWorkspaceErrorActions = () => {
 				<span className="text-description text-xs">
 					This happened on {unlokWorkspaceLabel(active)}
 					{active.email ? ` (${active.email})` : ""}.
+					{alternatives.length > 0 ? " Switching ends this session and starts fresh in the other workspace." : ""}
 				</span>
 			)}
 			<span className="flex flex-wrap gap-2">

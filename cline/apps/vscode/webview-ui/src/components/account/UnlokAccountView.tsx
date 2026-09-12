@@ -35,8 +35,10 @@ async function openUnlokSignIn() {
  * deep link that made VS Code offer to install upstream Cline.
  */
 export const UnlokAccountView = () => {
-	const { unlokWorkspaces = [] } = useExtensionState()
+	const { unlokWorkspaces = [], currentTaskItem } = useExtensionState()
 	const active = unlokWorkspaces.find((w) => w.active)
+	// Switching ends the open session (the host does it), so say so up front.
+	const sessionOpen = Boolean(currentTaskItem)
 	const [info, setInfo] = useState<UnlokWorkspaceInfo | null>(null)
 	const [infoFailed, setInfoFailed] = useState(false)
 
@@ -85,6 +87,12 @@ export const UnlokAccountView = () => {
 				</span>
 			</div>
 
+			{sessionOpen && unlokWorkspaces.length > 1 && (
+				<p className="m-0 text-description text-[11px]">
+					A session is open. Switching workspaces ends it, so the next message starts fresh in the workspace you pick.
+				</p>
+			)}
+
 			<ul className="m-0 flex list-none flex-col gap-1.5 p-0">
 				{unlokWorkspaces.map((workspace) => {
 					const label = unlokWorkspaceLabel(workspace)
@@ -103,7 +111,9 @@ export const UnlokAccountView = () => {
 							/>
 							<span className="flex min-w-0 flex-1 flex-col">
 								<span className="truncate font-medium">{label}</span>
-								{workspace.email && <span className="truncate text-description text-[11px]">{workspace.email}</span>}
+								{workspace.email && (
+									<span className="truncate text-description text-[11px]">{workspace.email}</span>
+								)}
 								{failing && (
 									<span className="text-error text-[11px]" title={workspace.lastError}>
 										Not working right now
@@ -114,7 +124,7 @@ export const UnlokAccountView = () => {
 								<span className="shrink-0 text-[10px] uppercase tracking-wide text-cline">Active</span>
 							) : (
 								<VSCodeButton appearance="secondary" onClick={() => switchTo(workspace.id)}>
-									Use this workspace
+									{sessionOpen ? "End session and use this workspace" : "Use this workspace"}
 								</VSCodeButton>
 							)}
 							{failing && (
@@ -135,8 +145,8 @@ export const UnlokAccountView = () => {
 					<UnlokWorkspaceInfoCard info={info} />
 				) : infoFailed ? (
 					<p className="m-0 text-description text-xs">
-						Connected, but the workspace details could not be loaded right now. If it keeps failing, reconnect
-						it or switch to another workspace.
+						Connected, but the workspace details could not be loaded right now. If it keeps failing, reconnect it or
+						switch to another workspace.
 					</p>
 				) : (
 					<p className="m-0 text-description text-xs">Loading workspace details…</p>
@@ -147,8 +157,8 @@ export const UnlokAccountView = () => {
 			</VSCodeButton>
 
 			<p className="m-0 text-description text-[11px]">
-				Adding opens Unlok in your browser so you can pick an account and workspace. It joins this list and
-				becomes active. Usage, models and billing live in the{" "}
+				Adding opens Unlok in your browser so you can pick an account and workspace. It joins this list and becomes
+				active. Usage, models and billing live in the{" "}
 				<VSCodeLink className="text-inherit" href={UNLOK_DASHBOARD_URL} style={{ fontSize: "inherit" }}>
 					Unlok dashboard
 				</VSCodeLink>

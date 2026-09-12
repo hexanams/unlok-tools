@@ -57,6 +57,7 @@ import { buildStartSessionInput, createHistoryItemFromSession } from "./cline-se
 import {
 	removeUnlokWorkspace as removeStoredUnlokWorkspace,
 	setActiveUnlokWorkspace as activateStoredUnlokWorkspace,
+	summarizeUnlokWorkspaces,
 } from "@/core/controller/account/unlokWorkspaces"
 import type { UnlokCallbackDetails } from "@/sdk/auth-service"
 import { MessageTranslatorState, reshapeErrorForWebview } from "./message-translator"
@@ -1173,6 +1174,23 @@ export class Controller {
 	}
 
 	/**
+	 * Injects a plain informational message into the active chat view --
+	 * the same mechanism hooks already use to show host-originated messages
+	 * (see hooks-adapter.ts's emitHookMessage? calls), exposed here as a
+	 * standalone method for callers with no hook context, like the
+	 * /company-memory command's answer (companyMemory/ask.ts).
+	 */
+	postInfoMessage(text: string): void {
+		this.messages.emitHookMessage({
+			ts: Date.now(),
+			type: "say",
+			say: "info",
+			text,
+			partial: false,
+		})
+	}
+
+	/**
 	 * Get the active API provider for the current mode.
 	 */
 	private getActiveProviderId(): string | undefined {
@@ -1983,19 +2001,47 @@ export class Controller {
 		await this.postStateToWebview()
 	}
 
-	/** Switch chat to another connected Unlok workspace (see unlokWorkspaces.ts). */
+	/**
+	 * Switch chat to another connected Unlok workspace (see unlokWorkspaces.ts).
+	 * A switch ENDS the current session first: keys, models and budget are per
+	 * workspace, so a conversation started in one must not continue billing or
+	 * routing through another. The next message starts a fresh task in the
+	 * new workspace.
+	 */
 	async setActiveUnlokWorkspace(id: string): Promise<void> {
+		const before = this.activeUnlokWorkspaceId()
 		if (activateStoredUnlokWorkspace(this.stateManager, id)) {
+			if (this.activeUnlokWorkspaceId() !== before) {
+				await this.endSessionForWorkspaceChange()
+			}
 			this.persistProviderApiKeyFromState("unlok")
 		}
 		await this.postStateToWebview()
 	}
 
 	async removeUnlokWorkspace(id: string): Promise<void> {
+		const before = this.activeUnlokWorkspaceId()
 		if (removeStoredUnlokWorkspace(this.stateManager, id)) {
+			if (this.activeUnlokWorkspaceId() !== before) {
+				await this.endSessionForWorkspaceChange()
+			}
 			this.persistProviderApiKeyFromState("unlok")
 		}
 		await this.postStateToWebview()
+	}
+
+	private activeUnlokWorkspaceId(): string | undefined {
+		return summarizeUnlokWorkspaces(this.stateManager).find((w) => w.active)?.id
+	}
+
+	private async endSessionForWorkspaceChange(): Promise<void> {
+		if (!this.task) {
+			return
+		}
+		if (this.sessions.getActiveSession()?.isRunning) {
+			await this.cancelTask()
+		}
+		await this.clearTask()
 	}
 
 	async getTaskHistory(request: GetTaskHistoryRequest): Promise<TaskHistoryArray> {
