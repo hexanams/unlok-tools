@@ -1,6 +1,6 @@
 # Workspace rules across products
 
-**Status (2026-09-12):** Phase A shipped. Backend b5099f6 (`GET /v1/rules`, `/v1/rules/surfaces`, version and ETag, rendered block, `rules_version` on `/v1/me`, `X-Unlok-Rules-Version` recorded on requests), dashboard 7f897ee (chips from the registry, version on the tab and on Requests), extension 1268a0d (ETag cached fetch, the version header on every completion, the Team plan note under Settings › Rules). Phase B shipped in backend 3233f26: Optimus reads the workspace's rules once when its digest is built and reuses them until it expires, so rules load on first launch rather than per message. Phases B2, C and D are next, in that order.
+**Status (2026-09-12):** Phase A shipped. Backend b5099f6 (`GET /v1/rules`, `/v1/rules/surfaces`, version and ETag, rendered block, `rules_version` on `/v1/me`, `X-Unlok-Rules-Version` recorded on requests), dashboard 7f897ee (chips from the registry, version on the tab and on Requests), extension 1268a0d (ETag cached fetch, the version header on every completion, the Team plan note under Settings › Rules). Phase B shipped in backend 3233f26: Optimus reads the workspace's rules once when its digest is built and reuses them until it expires, so rules load on first launch rather than per message. Phase B2 shipped as the gateway (backend 06ed93b, LibreChat 7f52ff8): a completion from a team key that carries no rules version gets the workspace's rules for its product prepended, once per session; the dashboard chat and raw API calls follow rules with no client work. Phase C shipped as one header and a read only Options view in the Browser Agent (unlok-tools nanobrowser). The repository tier is one file now, `UNLOK.md`, not a `.unlok/` folder (see the guide). Phase D is next.
 
 ## Context
 
@@ -67,19 +67,21 @@ Optimus is server side, so this is a backend change and every product's `/optimu
 
 **Tests:** a policy in the workspace reaches the answer call's system prompt; a personal caller's prompt carries no block; a member without `memory_team` still gets team rules; cache hit within the window, miss after a version change.
 
-## Phase B2: the dashboard chat
+## Phase B2: the gateway applies rules when the client did not
 
-The chat on the dashboard sends its completions with the person's session, so this is server side too and needs no client change to take effect.
+Built instead of a chat-only loader. Every chat completion already says whether the client loaded rules (the extension sends `X-Unlok-Rules-Version`). When that header is missing and the key belongs to a team, the backend prepends the workspace's rendered block for the product named by `X-Unlok-Surface` (`chat`, `browser`; anything else counts as the new `api` product) as a system message, the way the compacted summary is added. Read once per session at its first message and kept for the session; without a session, once a minute per workspace. Saving rules on the dashboard forgets the workspace cache. The request records the version and `rules_source: gateway`, and the Requests page shows both.
 
-- `chat_completions` recognises a dashboard session caller (as opposed to an API key) and prepends the workspace's `chat` block as a system message, the same way the compacted summary is added today (`_apply_compacted_summary` already tolerates several system messages). Enforced first.
-- The chat page shows a small "Rules applied: N, version a1b2c3" line under the composer with a link to Governance, so a member can see the workspace's rules are in play without opening them.
-- The request's usage event records the rules version like every other surface.
+- The dashboard chat (LibreChat) sends `X-Unlok-Surface: chat` from its endpoint config, so it needs no other change.
+- Raw API use with a team key follows the `api` rules unless the script loads rules itself and says so.
+- The Browser Agent sends `X-Unlok-Surface: browser` on gateway requests (Phase C).
 
-**Tests:** a session caller gets the block, an API key caller does not (the extension merges its own), the version is recorded.
+**Tests:** the block for a team key without a version, none for a personal key, per-session read once, per-workspace cache and its invalidation on save, surface defaulting.
 
 ## Phase C: the Browser Agent
 
-The Browser Agent runs as a device account (a personal workspace) until a person connects a team account, so most installs have no workspace rules and the store must say so plainly rather than fail.
+Shipped as the smaller shape the gateway allows: one header and a read only view. Its gateway requests carry `X-Unlok-Surface: browser`, so the backend adds the rules marked for the Browser Agent to every task; Options › Workspace rules lists them with the version and a Refresh button, or shows the Team plan notice on a device or personal account. The store and prompt splitting below are not needed while the gateway does the work; they stay here as the path if the planner ever needs the block shaped differently.
+
+The Browser Agent runs as a device account (a personal workspace) until a person connects a team account, so most installs have no workspace rules and the view must say so plainly rather than fail.
 
 - `packages/storage/lib/settings/workspaceRules.ts`: a `createStorage` backed store `{version, workspace, rules, rendered, fetchedAt}` plus `refreshWorkspaceRules(baseUrl, apiKey)` that sends `If-None-Match` and keeps the stored copy on 304 or on any failure. A task never waits on the network for rules: refresh runs at task start with a two second budget, and the task uses whatever the store holds.
 - `Executor` reads the store once per task and hands `rendered` to `PlannerPrompt` and `NavigatorPrompt`, which append it after their templates (`BasePrompt` gets an optional `workspaceRulesBlock`). The planner gets the whole block; the navigator gets policies only, since its prompt is action oriented and every token there costs on each step.

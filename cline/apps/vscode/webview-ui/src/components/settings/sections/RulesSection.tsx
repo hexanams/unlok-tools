@@ -90,7 +90,7 @@ const RulesSection = ({ renderSectionHeader }: RulesSectionProps) => {
 							<span>
 								{data.initialized
 									? `Set up for Unlok${data.boundWorkspaceName ? `, bound to ${data.boundWorkspaceName}` : ""}.`
-									: "Not set up for Unlok yet: no UNLOK.md and no .unlok folder."}
+									: "Not set up for Unlok yet: no UNLOK.md in this folder."}
 							</span>
 							{data.problems.map((p) => (
 								<span className="text-error" key={p}>
@@ -113,7 +113,8 @@ const RulesSection = ({ renderSectionHeader }: RulesSectionProps) => {
 					)}
 					{data && data.rules.length === 0 && (
 						<p className="m-0 text-sm text-description">
-							No rules yet. Add UNLOK.md, files under .unlok/rules, or ~/.unlok/UNLOK.md.
+							No rules yet. Add UNLOK.md at the repository root (every &quot;##&quot; section is a rule),
+							UNLOK.local.md for this machine, or ~/.unlok/UNLOK.md for yourself everywhere.
 						</p>
 					)}
 					{data && data.rules.length > 0 && (

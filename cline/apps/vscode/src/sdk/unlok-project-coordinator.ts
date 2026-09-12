@@ -11,7 +11,6 @@ import {
 	detectUnlokProject,
 	type EffectiveRules,
 	loadEffectiveRules,
-	migrateLegacyRules,
 	scaffoldUnlokProject,
 	type UnlokProjectStatus,
 } from "@/core/project/unlok-project"
@@ -23,9 +22,9 @@ import type { SdkSessionLifecycle } from "./sdk-session-lifecycle"
 
 /** What the chat card carries; the webview renders it (UnlokProjectCard). */
 export type UnlokProjectCard =
-	| { kind: "init"; root: string; folderName: string; hasLegacyRules: boolean; workspaceName: string }
+	| { kind: "init"; root: string; folderName: string; hasLegacyDir: boolean; workspaceName: string }
 	| { kind: "binding"; root: string; teamId: string; workspaceName: string; activeWorkspaceName: string }
-	| { kind: "initialized"; root: string; created: string[]; movedLegacy: number }
+	| { kind: "initialized"; root: string; created: string[]; foldedLegacy: number }
 
 /**
  * The follow-up sent after scaffolding. It is a builtin slash command
@@ -125,7 +124,7 @@ export class UnlokProjectCoordinator {
 			}
 			const status = await detectUnlokProject(root)
 			const active = this.activeWorkspace()
-			const bound = status.settings?.workspace
+			const bound = status.binding
 			if (status.initialized && bound?.teamId && active && bound.teamId !== active.teamId) {
 				this.shownFor.add(root)
 				this.emitCard(
@@ -140,14 +139,19 @@ export class UnlokProjectCoordinator {
 				)
 				return
 			}
-			if (!status.initialized && !this.dismissedNow.has(root) && !(await isSetupDismissedForever(root))) {
+			if (
+				!status.initialized &&
+				!status.hasLegacyDir &&
+				!this.dismissedNow.has(root) &&
+				!(await isSetupDismissedForever(root))
+			) {
 				this.shownFor.add(root)
 				this.emitCard(
 					{
 						kind: "init",
 						root,
 						folderName: root.split(/[\\/]/).filter(Boolean).pop() ?? root,
-						hasLegacyRules: status.hasLegacyRules,
+						hasLegacyDir: status.hasLegacyDir,
 						workspaceName: active?.name ?? "",
 					},
 					sessionId,
@@ -158,16 +162,15 @@ export class UnlokProjectCoordinator {
 		}
 	}
 
-	/** Initialize: scaffold, move legacy rules, bind to the active team, then ask the agent to draft UNLOK.md. */
+	/** Initialize: write UNLOK.md bound to the active team, fold an earlier .unlok/ folder in, then ask the agent to draft it. */
 	async initialize(): Promise<UnlokProjectStatus> {
 		const root = await this.options.getWorkspaceRoot()
 		const active = this.activeWorkspace()
 		const result = await scaffoldUnlokProject(root, {
 			workspace: active?.teamId ? { teamId: active.teamId, name: active.name } : undefined,
 		})
-		const moved = await migrateLegacyRules(root)
 		const sessionId = this.options.sessions.getActiveSession()?.sessionId
-		this.emitCard({ kind: "initialized", root, created: result.created, movedLegacy: moved.length }, sessionId)
+		this.emitCard({ kind: "initialized", root, created: result.created, foldedLegacy: result.foldedLegacy }, sessionId)
 		await this.options.postStateToWebview()
 		try {
 			await this.options.sendFollowup(UNLOK_INIT_COMMAND)

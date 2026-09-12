@@ -6,9 +6,9 @@ import { AccountServiceClient } from "@/services/grpc-client"
 
 /** Mirrors UnlokProjectCard in src/sdk/unlok-project-coordinator.ts. */
 type Card =
-	| { kind: "init"; root: string; folderName: string; hasLegacyRules: boolean; workspaceName: string }
+	| { kind: "init"; root: string; folderName: string; hasLegacyDir: boolean; workspaceName: string }
 	| { kind: "binding"; root: string; teamId: string; workspaceName: string; activeWorkspaceName: string }
-	| { kind: "initialized"; root: string; created: string[]; movedLegacy: number }
+	| { kind: "initialized"; root: string; created: string[]; foldedLegacy: number }
 
 function parseCard(text: string | undefined): Card | undefined {
 	if (!text) {
@@ -55,9 +55,9 @@ export const UnlokProjectCard = ({ text }: { text?: string }) => {
 				<span className="text-description text-xs">
 					{card.created.length > 0
 						? `Created ${card.created.join(", ")}.`
-						: "The layout was already there; nothing was overwritten."}
-					{card.movedLegacy > 0
-						? ` Moved ${card.movedLegacy} rule file${card.movedLegacy === 1 ? "" : "s"} from .unlokrules into .unlok/rules.`
+						: "UNLOK.md was already there; nothing was overwritten."}
+					{card.foldedLegacy > 0
+						? ` Folded ${card.foldedLegacy} section${card.foldedLegacy === 1 ? "" : "s"} from the earlier .unlok folder into UNLOK.md and removed the folder.`
 						: ""}{" "}
 					The agent is drafting UNLOK.md now; the write goes through the usual file approval.
 				</span>
@@ -115,10 +115,9 @@ export const UnlokProjectCard = ({ text }: { text?: string }) => {
 		<div className="flex flex-col gap-2 rounded border border-[var(--vscode-widget-border)] bg-[var(--vscode-editorWidget-background)] px-3 py-2 text-sm">
 			<span className="font-medium">This repository isn't set up for Unlok yet.</span>
 			<span className="text-description text-xs">
-				Initialize creates UNLOK.md and a .unlok folder for rules, workflows, hooks and skills
-				{card.workspaceName ? `, binds the repository to ${card.workspaceName}` : ""}
-				{card.hasLegacyRules ? ", moves your .unlokrules files into .unlok/rules" : ""}, then has the agent draft UNLOK.md
-				from what it finds here. Every task in this folder loads it from then on.
+				Initialize creates one file, UNLOK.md: what this repository is and, as sections, the rules every task here follows
+				{card.workspaceName ? `. It binds the repository to ${card.workspaceName}` : ""}, then has the agent draft it from
+				what it finds here. Every task in this folder loads it from then on.
 			</span>
 			<span className="flex flex-wrap items-center gap-2">
 				<VSCodeButton

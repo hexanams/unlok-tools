@@ -1028,7 +1028,7 @@ export async function buildSessionConfig(input: SessionConfigInput): Promise<Cor
 
 	// The .unlok tiers and the memory index (docs/plans/2026-09-12-one-context-
 	// compaction-memory-and-unlok-folder.md). Rules from the workspace (Unlok
-	// only), the repo's UNLOK.md and .unlok/rules, and ~/.unlok/UNLOK.md go
+	// only), the repo's UNLOK.md and UNLOK.local.md, and ~/.unlok/UNLOK.md go
 	// into every session, any provider. The memory index goes in on the first
 	// turn of a new task only: a resumed task already carried it. Failure of
 	// any part degrades to omitting that section, never to blocking the task.

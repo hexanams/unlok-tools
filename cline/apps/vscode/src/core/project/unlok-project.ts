@@ -1,50 +1,46 @@
 /**
- * The .unlok folder: how a repository, a person and a workspace tell Unlok
- * how to work, and how those three tiers combine.
+ * UNLOK.md: how a repository, a person and a workspace tell Unlok how to
+ * work, and how those tiers combine.
  *
- * Layout in a repository (committed):
- *   UNLOK.md                  what this repo is and how to work in it
- *   .unlok/settings.json      { version, workspace: { teamId, name } }
- *   .unlok/rules/*.md         one rule per file
- *   .unlok/workflows/         slash workflows (same shape as .unlokrules/workflows)
- *   .unlok/hooks/  .unlok/skills/
- *   .unlok/rules.local.md, .unlok/settings.local.json   git ignored, this machine only
- * Personal: ~/.unlok/UNLOK.md.  Workspace: rules served by the backend.
+ * One file at the repository root, committed:
+ *   UNLOK.md          text above the first "##" describes the repository;
+ *                     every "##" section is one rule, named by its heading.
+ *                     Optional YAML front matter binds it to a workspace:
+ *                       ---
+ *                       workspace: <team id>
+ *                       workspace_name: Acme
+ *                       ---
+ *   UNLOK.local.md    the same shape, git ignored, this machine only.
+ * Personal: ~/.unlok/UNLOK.md. Workspace: rules served by the backend.
  *
- * Precedence, lowest to highest: workspace, repo, personal. Except workspace
- * rules marked enforced, which sit above everything and cannot be overridden
- * below. Modelled on Claude Code's ~/.claude / .claude / CLAUDE.md layering,
- * with the workspace tier Unlok adds for teams.
+ * Precedence, lowest to highest: workspace, repository, personal. Except
+ * workspace rules marked enforced, which sit above everything. Same-titled
+ * rules resolve by that order; different titles all apply.
  *
- * This module is dependency free on purpose (node:fs and node:path only) so
- * the CLI can adopt it unchanged.
+ * An earlier layout put rules under a .unlok/ folder. It is still read for
+ * one release, and Initialize folds it into UNLOK.md and removes it.
+ *
+ * Dependency free on purpose (node:fs, node:path, node:os only) so the CLI
+ * can adopt it unchanged.
  */
 
 import * as fs from "node:fs/promises"
 import * as os from "node:os"
 import * as path from "node:path"
 
-export const UNLOK_PROJECT_VERSION = 1
 export const UNLOK_MD = "UNLOK.md"
-export const UNLOK_DIR = ".unlok"
-export const UNLOK_RULES_DIR = "rules"
-export const UNLOK_WORKFLOWS_DIR = "workflows"
-export const UNLOK_HOOKS_DIR = "hooks"
-export const UNLOK_SKILLS_DIR = "skills"
-export const UNLOK_SETTINGS = "settings.json"
-export const UNLOK_SETTINGS_LOCAL = "settings.local.json"
-export const UNLOK_RULES_LOCAL = "rules.local.md"
-export const LEGACY_RULES_DIR = ".unlokrules"
+export const UNLOK_LOCAL_MD = "UNLOK.local.md"
+export const LEGACY_UNLOK_DIR = ".unlok"
 
 /** Where a rule came from, in ascending precedence for non-enforced rules. */
 export type RuleSource = "workspace" | "repo" | "personal" | "workspace-enforced"
 
 export interface UnlokRule {
-	/** Display name: the file name, the rule title, or the first line. */
+	/** The section heading, the file name for a preamble, or the rule title. */
 	title: string
 	body: string
 	source: RuleSource
-	/** The file or "workspace:<id>" the rule came from. */
+	/** The file (with a "#heading" suffix for a section), or "workspace:<id>". */
 	origin: string
 	enforced: boolean
 	kind: "instruction" | "policy"
@@ -58,21 +54,29 @@ export interface WorkspaceRuleInput {
 	enforced: boolean
 }
 
-export interface UnlokProjectSettings {
-	version: number
-	workspace?: { teamId: string; name?: string }
-	[key: string]: unknown
+export interface UnlokBinding {
+	teamId: string
+	name?: string
+}
+
+export interface ParsedUnlokMd {
+	binding?: UnlokBinding
+	/** Text above the first "##" section, without the front matter. */
+	preamble: string
+	sections: Array<{ title: string; body: string }>
+	/** Front matter lines that could not be read. */
+	problems: string[]
 }
 
 export interface UnlokProjectStatus {
 	root: string
-	/** UNLOK.md or .unlok/ exists. */
+	/** UNLOK.md exists. */
 	initialized: boolean
 	hasUnlokMd: boolean
-	hasUnlokDir: boolean
-	/** A legacy .unlokrules folder is present and could be moved. */
-	hasLegacyRules: boolean
-	settings?: UnlokProjectSettings
+	hasLocalMd: boolean
+	/** The earlier .unlok/ folder is present and can be folded into UNLOK.md. */
+	hasLegacyDir: boolean
+	binding?: UnlokBinding
 	/** Problems a doctor would report; empty when the layout is sound. */
 	problems: string[]
 }
@@ -100,72 +104,114 @@ async function readIfExists(p: string): Promise<string | undefined> {
 	}
 }
 
-async function readJsonIfExists(p: string): Promise<Record<string, unknown> | undefined> {
-	const text = await readIfExists(p)
-	if (text === undefined) {
-		return undefined
-	}
-	try {
-		const parsed = JSON.parse(text)
-		return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : undefined
-	} catch {
-		return undefined
-	}
-}
-
 export function personalUnlokDir(): string {
-	return process.env.CLINE_DIR?.trim() || path.join(os.homedir(), UNLOK_DIR)
+	return process.env.CLINE_DIR?.trim() || path.join(os.homedir(), ".unlok")
 }
 
 export function personalUnlokMdPath(): string {
 	return path.join(personalUnlokDir(), UNLOK_MD)
 }
 
-/** Reads the repo's layout without changing anything. */
-export async function detectUnlokProject(root: string): Promise<UnlokProjectStatus> {
-	const unlokDir = path.join(root, UNLOK_DIR)
-	const hasUnlokMd = await exists(path.join(root, UNLOK_MD))
-	const hasUnlokDir = await exists(unlokDir)
-	const hasLegacyRules = await exists(path.join(root, LEGACY_RULES_DIR))
-	const problems: string[] = []
-	let settings: UnlokProjectSettings | undefined
-	if (hasUnlokDir) {
-		const raw = await readJsonIfExists(path.join(unlokDir, UNLOK_SETTINGS))
-		if (await exists(path.join(unlokDir, UNLOK_SETTINGS))) {
-			if (!raw) {
-				problems.push(`${UNLOK_DIR}/${UNLOK_SETTINGS} is not valid JSON.`)
-			} else {
-				const version = typeof raw.version === "number" ? raw.version : undefined
-				if (version === undefined) {
-					problems.push(`${UNLOK_DIR}/${UNLOK_SETTINGS} has no version.`)
-				} else if (version > UNLOK_PROJECT_VERSION) {
-					problems.push(
-						`${UNLOK_DIR}/${UNLOK_SETTINGS} is version ${version}; this build understands ${UNLOK_PROJECT_VERSION}.`,
-					)
-				}
-				const workspace = raw.workspace
-				if (workspace !== undefined) {
-					const teamId = (workspace as { teamId?: unknown })?.teamId
-					if (typeof teamId !== "string" || !teamId.trim()) {
-						problems.push(`${UNLOK_DIR}/${UNLOK_SETTINGS} names a workspace without a teamId.`)
-					}
-				}
-				settings = { ...raw, version: version ?? UNLOK_PROJECT_VERSION } as UnlokProjectSettings
-			}
-		} else {
-			problems.push(`${UNLOK_DIR}/ exists but has no ${UNLOK_SETTINGS}.`)
-		}
-		if (!hasUnlokMd) {
-			problems.push(`${UNLOK_MD} is missing.`)
-		}
+// ---- parsing ---------------------------------------------------------------
+
+const FRONT_MATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/
+
+/** Reads the small front matter this file supports: flat "key: value" lines. */
+function parseFrontMatter(text: string): { fields: Record<string, string>; rest: string; problems: string[] } {
+	const match = FRONT_MATTER.exec(text)
+	if (!match) {
+		return { fields: {}, rest: text, problems: [] }
 	}
-	return { root, initialized: hasUnlokMd || hasUnlokDir, hasUnlokMd, hasUnlokDir, hasLegacyRules, settings, problems }
+	const fields: Record<string, string> = {}
+	const problems: string[] = []
+	for (const rawLine of match[1].split(/\r?\n/)) {
+		const line = rawLine.trim()
+		if (!line || line.startsWith("#")) {
+			continue
+		}
+		const colon = line.indexOf(":")
+		if (colon <= 0) {
+			problems.push(`Front matter line could not be read: ${line}`)
+			continue
+		}
+		const key = line.slice(0, colon).trim()
+		const value = line
+			.slice(colon + 1)
+			.trim()
+			.replace(/^["']|["']$/g, "")
+		fields[key] = value
+	}
+	return { fields, rest: text.slice(match[0].length), problems }
 }
 
+export function parseUnlokMd(text: string): ParsedUnlokMd {
+	const { fields, rest, problems } = parseFrontMatter(text)
+	const binding: UnlokBinding | undefined = fields.workspace?.trim()
+		? { teamId: fields.workspace.trim(), ...(fields.workspace_name?.trim() ? { name: fields.workspace_name.trim() } : {}) }
+		: undefined
+	const lines = rest.split(/\r?\n/)
+	const preamble: string[] = []
+	const sections: Array<{ title: string; body: string }> = []
+	let current: { title: string; body: string[] } | undefined
+	for (const line of lines) {
+		const heading = /^##\s+(.+?)\s*#*\s*$/.exec(line)
+		if (heading) {
+			if (current) {
+				sections.push({ title: current.title, body: current.body.join("\n").trim() })
+			}
+			current = { title: heading[1].trim(), body: [] }
+			continue
+		}
+		if (current) {
+			current.body.push(line)
+		} else {
+			preamble.push(line)
+		}
+	}
+	if (current) {
+		sections.push({ title: current.title, body: current.body.join("\n").trim() })
+	}
+	return { binding, preamble: preamble.join("\n").trim(), sections: sections.filter((s) => s.body), problems }
+}
+
+function renderFrontMatter(binding: UnlokBinding): string {
+	const lines = ["---", `workspace: ${binding.teamId}`]
+	if (binding.name) {
+		lines.push(`workspace_name: ${binding.name}`)
+	}
+	lines.push("---", "")
+	return lines.join("\n")
+}
+
+// ---- detect ----------------------------------------------------------------
+
+export async function detectUnlokProject(root: string): Promise<UnlokProjectStatus> {
+	const mdPath = path.join(root, UNLOK_MD)
+	const hasUnlokMd = await exists(mdPath)
+	const hasLocalMd = await exists(path.join(root, UNLOK_LOCAL_MD))
+	const hasLegacyDir = await exists(path.join(root, LEGACY_UNLOK_DIR))
+	const problems: string[] = []
+	let binding: UnlokBinding | undefined
+	if (hasUnlokMd) {
+		const parsed = parseUnlokMd((await readIfExists(mdPath)) ?? "")
+		binding = parsed.binding
+		problems.push(...parsed.problems)
+		if (!parsed.preamble && parsed.sections.length === 0) {
+			problems.push(`${UNLOK_MD} is empty.`)
+		}
+	}
+	if (hasLegacyDir) {
+		problems.push(`A ${LEGACY_UNLOK_DIR}/ folder from the earlier layout is present. Initialize folds it into ${UNLOK_MD}.`)
+	}
+	return { root, initialized: hasUnlokMd, hasUnlokMd, hasLocalMd, hasLegacyDir, binding, problems }
+}
+
+// ---- scaffold --------------------------------------------------------------
+
 export interface ScaffoldOptions {
-	/** The active workspace when it is a team: written as the repo's binding. */
-	workspace?: { teamId: string; name?: string }
-	/** Repo name for the placeholder UNLOK.md. */
+	/** The active workspace when it is a team: written as the file's binding. */
+	workspace?: UnlokBinding
+	/** Repository name for the placeholder. */
 	projectName?: string
 }
 
@@ -173,128 +219,61 @@ export interface ScaffoldResult {
 	created: string[]
 	/** Files left alone because they already existed. */
 	kept: string[]
+	/** Sections folded in from the earlier .unlok/ folder, which was then removed. */
+	foldedLegacy: number
 }
 
-const GITIGNORE_LINES = [`${UNLOK_DIR}/${UNLOK_RULES_LOCAL}`, `${UNLOK_DIR}/${UNLOK_SETTINGS_LOCAL}`]
-
-function placeholderUnlokMd(projectName: string): string {
-	return [
+function placeholderUnlokMd(projectName: string, binding?: UnlokBinding): string {
+	const body = [
 		`# ${projectName}`,
 		"",
-		"Unlok reads this file at the start of every task in this repository. Keep it short and current.",
-		"",
-		"## What this is",
-		"",
-		"One paragraph on what the project does and who it is for.",
+		'Unlok reads this file at the start of every task in this repository. The text up here describes the project; every "##" section below is one rule, named by its heading.',
 		"",
 		"## How to work here",
 		"",
-		"- How to install, run and test.",
-		"- Conventions that are not obvious from the code.",
-		"- Anything a new contributor gets wrong the first time.",
+		"How to install, run and test, and the conventions that are not obvious from the code.",
 		"",
 		"## Where things live",
 		"",
-		"- Key folders and what they are for.",
-		"",
-		`Rules that apply to every task go in \`${UNLOK_DIR}/${UNLOK_RULES_DIR}/\`, one per file.`,
+		"Key folders and what they are for.",
 		"",
 	].join("\n")
+	return binding ? renderFrontMatter(binding) + body : body
 }
 
 /**
- * Creates the layout. Idempotent: existing files are never overwritten, so
- * running it twice (or after a person edited UNLOK.md) changes nothing.
+ * Creates UNLOK.md if missing (never overwriting), git ignores UNLOK.local.md,
+ * adds a binding to an existing file that has no front matter, and folds an
+ * earlier .unlok/ folder into the file. Running it twice changes nothing.
  */
 export async function scaffoldUnlokProject(root: string, options: ScaffoldOptions = {}): Promise<ScaffoldResult> {
 	const created: string[] = []
 	const kept: string[] = []
-	const unlokDir = path.join(root, UNLOK_DIR)
-	for (const dir of [
-		unlokDir,
-		...[UNLOK_RULES_DIR, UNLOK_WORKFLOWS_DIR, UNLOK_HOOKS_DIR, UNLOK_SKILLS_DIR].map((d) => path.join(unlokDir, d)),
-	]) {
-		await fs.mkdir(dir, { recursive: true })
-	}
+	const mdPath = path.join(root, UNLOK_MD)
 
-	const writeIfMissing = async (file: string, content: string) => {
-		const rel = path.relative(root, file)
-		if (await exists(file)) {
-			kept.push(rel)
-			return
-		}
-		await fs.writeFile(file, content, "utf8")
-		created.push(rel)
-	}
-
-	await writeIfMissing(path.join(root, UNLOK_MD), placeholderUnlokMd(options.projectName ?? path.basename(root)))
-
-	const settingsPath = path.join(unlokDir, UNLOK_SETTINGS)
-	if (await exists(settingsPath)) {
-		kept.push(path.relative(root, settingsPath))
-		// A binding given now is added to existing settings that lack one.
+	if (await exists(mdPath)) {
+		kept.push(UNLOK_MD)
 		if (options.workspace) {
-			const raw = (await readJsonIfExists(settingsPath)) ?? {}
-			if (!raw.workspace) {
-				await fs.writeFile(
-					settingsPath,
-					`${JSON.stringify({ ...raw, version: raw.version ?? UNLOK_PROJECT_VERSION, workspace: options.workspace }, null, 2)}\n`,
-					"utf8",
-				)
+			const text = (await readIfExists(mdPath)) ?? ""
+			if (!FRONT_MATTER.test(text)) {
+				await fs.writeFile(mdPath, renderFrontMatter(options.workspace) + text, "utf8")
 			}
 		}
 	} else {
-		const settings: UnlokProjectSettings = { version: UNLOK_PROJECT_VERSION }
-		if (options.workspace) {
-			settings.workspace = options.workspace
-		}
-		await fs.writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8")
-		created.push(path.relative(root, settingsPath))
+		await fs.writeFile(mdPath, placeholderUnlokMd(options.projectName ?? path.basename(root), options.workspace), "utf8")
+		created.push(UNLOK_MD)
 	}
 
-	await writeIfMissing(
-		path.join(unlokDir, UNLOK_RULES_DIR, "README.md"),
-		"One rule per Markdown file. The file name is the rule's title. These apply to every task in this repository.\n",
-	)
-
-	// .gitignore: keep the machine-local files out of the repo.
 	const gitignorePath = path.join(root, ".gitignore")
 	const existing = (await readIfExists(gitignorePath)) ?? ""
-	const missing = GITIGNORE_LINES.filter((line) => !existing.split(/\r?\n/).some((l) => l.trim() === line))
-	if (missing.length > 0) {
+	if (!existing.split(/\r?\n/).some((l) => l.trim() === UNLOK_LOCAL_MD)) {
 		const prefix = existing.length === 0 || existing.endsWith("\n") ? "" : "\n"
-		await fs.writeFile(gitignorePath, `${existing}${prefix}${missing.join("\n")}\n`, "utf8")
+		await fs.writeFile(gitignorePath, `${existing}${prefix}${UNLOK_LOCAL_MD}\n`, "utf8")
 		created.push(".gitignore")
 	}
-	return { created, kept }
-}
 
-/** Moves .unlokrules/*.md into .unlok/rules/ (files only, never overwriting). */
-export async function migrateLegacyRules(root: string): Promise<string[]> {
-	const legacy = path.join(root, LEGACY_RULES_DIR)
-	const target = path.join(root, UNLOK_DIR, UNLOK_RULES_DIR)
-	const moved: string[] = []
-	let entries: string[]
-	try {
-		entries = await fs.readdir(legacy)
-	} catch {
-		return moved
-	}
-	await fs.mkdir(target, { recursive: true })
-	for (const name of entries) {
-		const from = path.join(legacy, name)
-		const stat = await fs.stat(from).catch(() => undefined)
-		if (!stat?.isFile() || !name.toLowerCase().endsWith(".md")) {
-			continue
-		}
-		const to = path.join(target, name)
-		if (await exists(to)) {
-			continue
-		}
-		await fs.rename(from, to)
-		moved.push(name)
-	}
-	return moved
+	const foldedLegacy = await foldLegacyFolder(root)
+	return { created, kept, foldedLegacy }
 }
 
 function titleFromMarkdown(fileName: string, body: string): string {
@@ -308,47 +287,137 @@ function titleFromMarkdown(fileName: string, body: string): string {
 	return fileName.replace(/\.md$/i, "")
 }
 
-async function readRuleFiles(dir: string, source: RuleSource): Promise<UnlokRule[]> {
+function stripLeadingHeading(body: string): string {
+	const lines = body.split(/\r?\n/)
+	const first = lines.findIndex((l) => l.trim())
+	if (first >= 0 && /^#\s+/.test(lines[first].trim())) {
+		lines.splice(first, 1)
+	}
+	return lines.join("\n").trim()
+}
+
+async function readLegacyRuleFiles(dir: string): Promise<Array<{ title: string; body: string; file: string }>> {
 	let names: string[]
 	try {
 		names = (await fs.readdir(dir)).filter((n) => n.toLowerCase().endsWith(".md") && n.toLowerCase() !== "readme.md").sort()
 	} catch {
 		return []
 	}
-	const rules: UnlokRule[] = []
+	const out: Array<{ title: string; body: string; file: string }> = []
 	for (const name of names) {
 		const file = path.join(dir, name)
 		const body = (await readIfExists(file))?.trim()
-		if (!body) {
-			continue
+		if (body) {
+			out.push({ title: titleFromMarkdown(name, body), body: stripLeadingHeading(body) || body, file })
 		}
-		rules.push({ title: titleFromMarkdown(name, body), body, source, origin: file, enforced: false, kind: "instruction" })
 	}
-	return rules
+	return out
 }
 
-/** The repo tier: UNLOK.md, then .unlok/rules/*.md, then rules.local.md. */
-export async function loadRepoRules(root: string): Promise<UnlokRule[]> {
+/**
+ * Folds the earlier layout into the single file: .unlok/rules/*.md become
+ * "##" sections of UNLOK.md, .unlok/rules.local.md becomes UNLOK.local.md,
+ * a binding in .unlok/settings.json becomes front matter when the file has
+ * none, then the folder is removed. Returns how many sections were folded.
+ */
+export async function foldLegacyFolder(root: string): Promise<number> {
+	const legacy = path.join(root, LEGACY_UNLOK_DIR)
+	if (!(await exists(legacy))) {
+		return 0
+	}
+	const mdPath = path.join(root, UNLOK_MD)
+	let text = (await readIfExists(mdPath)) ?? ""
+	const parsed = parseUnlokMd(text)
+	const present = new Set(parsed.sections.map((s) => s.title.toLowerCase()))
+	let folded = 0
+
+	const rules = await readLegacyRuleFiles(path.join(legacy, "rules"))
+	const additions = rules.filter((r) => !present.has(r.title.toLowerCase()))
+	if (additions.length > 0) {
+		const block = additions.map((r) => `## ${r.title}\n\n${r.body}`).join("\n\n")
+		text = `${text.replace(/\s*$/, "")}\n\n${block}\n`
+		folded += additions.length
+	}
+
+	if (!parsed.binding) {
+		try {
+			const settings = JSON.parse((await readIfExists(path.join(legacy, "settings.json"))) ?? "{}") as {
+				workspace?: { teamId?: string; name?: string }
+			}
+			if (settings.workspace?.teamId) {
+				text = renderFrontMatter({ teamId: settings.workspace.teamId, name: settings.workspace.name }) + text
+			}
+		} catch {
+			// Unreadable settings: nothing to carry over.
+		}
+	}
+	if (text.trim()) {
+		await fs.writeFile(mdPath, text, "utf8")
+	}
+
+	const local = (await readIfExists(path.join(legacy, "rules.local.md")))?.trim()
+	if (local) {
+		const localPath = path.join(root, UNLOK_LOCAL_MD)
+		const existing = (await readIfExists(localPath)) ?? ""
+		await fs.writeFile(localPath, existing ? `${existing.replace(/\s*$/, "")}\n\n${local}\n` : `${local}\n`, "utf8")
+		folded += 1
+	}
+
+	await fs.rm(legacy, { recursive: true, force: true })
+	return folded
+}
+
+// ---- load ------------------------------------------------------------------
+
+function rulesFromFile(file: string, text: string, source: RuleSource, preambleTitle: string): UnlokRule[] {
+	const parsed = parseUnlokMd(text)
 	const rules: UnlokRule[] = []
-	const md = (await readIfExists(path.join(root, UNLOK_MD)))?.trim()
-	if (md) {
+	if (parsed.preamble) {
+		rules.push({ title: preambleTitle, body: parsed.preamble, source, origin: file, enforced: false, kind: "instruction" })
+	}
+	for (const section of parsed.sections) {
 		rules.push({
-			title: UNLOK_MD,
-			body: md,
-			source: "repo",
-			origin: path.join(root, UNLOK_MD),
+			title: section.title,
+			body: section.body,
+			source,
+			origin: `${file}#${section.title}`,
 			enforced: false,
 			kind: "instruction",
 		})
 	}
-	rules.push(...(await readRuleFiles(path.join(root, UNLOK_DIR, UNLOK_RULES_DIR), "repo")))
-	const local = (await readIfExists(path.join(root, UNLOK_DIR, UNLOK_RULES_LOCAL)))?.trim()
-	if (local) {
+	return rules
+}
+
+/** The repository tier: UNLOK.md (and, for one release, the earlier .unlok/rules), then UNLOK.local.md. */
+export async function loadRepoRules(root: string): Promise<UnlokRule[]> {
+	const rules: UnlokRule[] = []
+	const mdPath = path.join(root, UNLOK_MD)
+	const md = await readIfExists(mdPath)
+	if (md?.trim()) {
+		rules.push(...rulesFromFile(mdPath, md, "repo", UNLOK_MD))
+	}
+	for (const legacy of await readLegacyRuleFiles(path.join(root, LEGACY_UNLOK_DIR, "rules"))) {
 		rules.push({
-			title: UNLOK_RULES_LOCAL,
-			body: local,
+			title: legacy.title,
+			body: legacy.body,
+			source: "repo",
+			origin: legacy.file,
+			enforced: false,
+			kind: "instruction",
+		})
+	}
+	const localPath = path.join(root, UNLOK_LOCAL_MD)
+	const local = await readIfExists(localPath)
+	if (local?.trim()) {
+		rules.push(...rulesFromFile(localPath, local, "personal", UNLOK_LOCAL_MD))
+	}
+	const legacyLocal = (await readIfExists(path.join(root, LEGACY_UNLOK_DIR, "rules.local.md")))?.trim()
+	if (legacyLocal) {
+		rules.push({
+			title: "rules.local.md",
+			body: legacyLocal,
 			source: "personal",
-			origin: path.join(root, UNLOK_DIR, UNLOK_RULES_LOCAL),
+			origin: path.join(root, LEGACY_UNLOK_DIR, "rules.local.md"),
 			enforced: false,
 			kind: "instruction",
 		})
@@ -359,11 +428,11 @@ export async function loadRepoRules(root: string): Promise<UnlokRule[]> {
 /** The personal tier: ~/.unlok/UNLOK.md. */
 export async function loadPersonalRules(): Promise<UnlokRule[]> {
 	const file = personalUnlokMdPath()
-	const body = (await readIfExists(file))?.trim()
-	if (!body) {
+	const text = await readIfExists(file)
+	if (!text?.trim()) {
 		return []
 	}
-	return [{ title: `~/${UNLOK_DIR}/${UNLOK_MD}`, body, source: "personal", origin: file, enforced: false, kind: "instruction" }]
+	return rulesFromFile(file, text, "personal", `~/.unlok/${UNLOK_MD}`)
 }
 
 /** The workspace tier, from the backend's rule rows. */
@@ -386,8 +455,7 @@ const TIER_RANK: Record<RuleSource, number> = { workspace: 0, repo: 1, personal:
  * Combines the tiers. Every rule is kept unless a higher tier carries a
  * rule with the same title, in which case the lower one is dropped and
  * reported as overridden. Enforced workspace rules rank above everything
- * and are listed first, so the model reads them before anything a repo or
- * a person wrote.
+ * and are listed first.
  */
 export function mergeRules(input: { workspace?: UnlokRule[]; repo?: UnlokRule[]; personal?: UnlokRule[] }): EffectiveRules {
 	const all = [...(input.workspace ?? []), ...(input.repo ?? []), ...(input.personal ?? [])]

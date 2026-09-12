@@ -101,7 +101,7 @@ Below is the user's input when they indicated that they wanted to create a compr
  * chat shows only "/init"; the model receives these instructions.
  */
 export const UNLOK_INIT_INSTRUCTIONS = `<explicit_instructions type="init">
-This repository was just set up for Unlok. Read it (README, manifests, folder layout, any existing docs) and rewrite UNLOK.md so a new contributor learns: what the project is, how to install, run and test it, the conventions that are not obvious from the code, and where things live. Keep it under 120 lines, plain language, no marketing. If .unlok/rules/ has rule files, leave them as they are. Do not change anything else. When UNLOK.md is written, finish with a two-line summary of what it covers.
+This repository was just set up for Unlok. Read it (README, manifests, folder layout, any existing docs) and rewrite UNLOK.md so a new contributor learns: what the project is, how to install, run and test it, the conventions that are not obvious from the code, and where things live. Keep it under 120 lines, plain language, no marketing. Keep the front matter at the top exactly as it is. Write the description above the first "##" heading; every "##" section is one rule the agent will follow on every task, named by its heading, so keep sections short and keep any sections that are already there. Do not change anything else. When UNLOK.md is written, finish with a two-line summary of what it covers.
 </explicit_instructions>`
 
 export const BUILTIN_SLASH_COMMANDS: AvailableRuntimeCommand[] = [

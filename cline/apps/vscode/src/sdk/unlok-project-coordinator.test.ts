@@ -75,7 +75,7 @@ describe("UnlokProjectCoordinator", () => {
 		const { coordinator, options } = makeCoordinator()
 		await coordinator.afterTaskStarted("s1")
 		await coordinator.afterTaskStarted("s2")
-		expect(cards(options)).toEqual([expect.objectContaining({ kind: "init", workspaceName: "Acme", hasLegacyRules: false })])
+		expect(cards(options)).toEqual([expect.objectContaining({ kind: "init", workspaceName: "Acme", hasLegacyDir: false })])
 
 		await coordinator.dismiss("now")
 		const again = makeCoordinator()
@@ -98,27 +98,25 @@ describe("UnlokProjectCoordinator", () => {
 		expect(cards(options)).toEqual([])
 	})
 
-	it("Initialize scaffolds with the team binding, moves legacy rules, and sends /init", async () => {
-		await fs.mkdir(path.join(root, ".unlokrules"), { recursive: true })
-		await fs.writeFile(path.join(root, ".unlokrules", "style.md"), "# Style\nTabs.")
+	it("Initialize writes UNLOK.md bound to the team, folds an earlier .unlok folder in, and sends /init", async () => {
+		await fs.mkdir(path.join(root, ".unlok", "rules"), { recursive: true })
+		await fs.writeFile(path.join(root, ".unlok", "rules", "style.md"), "# Style\nTabs.")
 		const { coordinator, options } = makeCoordinator({ teamId: "team-1" })
 
 		const status = await coordinator.initialize()
 
 		expect(status.initialized).toBe(true)
-		expect(status.settings?.workspace).toEqual({ teamId: "team-1", name: "Acme" })
-		expect(await fs.readFile(path.join(root, ".unlok", "rules", "style.md"), "utf8")).toBe("# Style\nTabs.")
+		expect(status.binding).toEqual({ teamId: "team-1", name: "Acme" })
+		const text = await fs.readFile(path.join(root, "UNLOK.md"), "utf8")
+		expect(text).toContain("workspace: team-1")
+		expect(text).toContain("## Style\n\nTabs.")
+		expect(await fs.stat(path.join(root, ".unlok")).catch(() => undefined)).toBeUndefined()
 		expect(options.sendFollowup).toHaveBeenCalledWith(UNLOK_INIT_COMMAND)
-		expect(cards(options)).toEqual([expect.objectContaining({ kind: "initialized", movedLegacy: 1 })])
+		expect(cards(options)).toEqual([expect.objectContaining({ kind: "initialized", foldedLegacy: 1 })])
 	})
 
 	it("shows the binding card when the repo names another workspace", async () => {
-		await fs.mkdir(path.join(root, ".unlok"), { recursive: true })
-		await fs.writeFile(
-			path.join(root, ".unlok", "settings.json"),
-			JSON.stringify({ version: 1, workspace: { teamId: "other", name: "Globex" } }),
-		)
-		await fs.writeFile(path.join(root, "UNLOK.md"), "# x")
+		await fs.writeFile(path.join(root, "UNLOK.md"), "---\nworkspace: other\nworkspace_name: Globex\n---\n# x")
 		const { coordinator, options } = makeCoordinator({ teamId: "team-1" })
 		await coordinator.afterTaskStarted("s1")
 		expect(cards(options)).toEqual([
