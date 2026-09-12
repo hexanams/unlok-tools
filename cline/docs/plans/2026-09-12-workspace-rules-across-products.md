@@ -1,5 +1,7 @@
 # Workspace rules across products
 
+**Status (2026-09-12):** Phase A shipped. Backend b5099f6 (`GET /v1/rules`, `/v1/rules/surfaces`, version and ETag, rendered block, `rules_version` on `/v1/me`, `X-Unlok-Rules-Version` recorded on requests), dashboard 7f897ee (chips from the registry, version on the tab and on Requests), extension 1268a0d (ETag cached fetch, the version header on every completion, the Team plan note under Settings › Rules). Phases B, B2, C and D are next, in that order.
+
 ## Context
 
 Workspace rules shipped on 2026-09-12 as a team owned list (`team_rules`) with a kind (instruction or policy), an enforced flag, and an `applies_to` set naming the products a rule is for: the VS Code extension, the Browser Agent, Optimus, and the dashboard's chat. Today only the extension loads them, through `GET /v1/me/rules?surface=extension`, merged with the repository's `.unlok` tier and the person's `~/.unlok/UNLOK.md`. The Browser Agent and Optimus store and display their rules but never read them.
