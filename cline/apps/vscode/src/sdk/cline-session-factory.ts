@@ -38,6 +38,8 @@ import type { Mode } from "@shared/storage/types"
 import { reasoningEffortFromThinkingBudget } from "@shared/utils/reasoning-support"
 import { stringifyVsCodeLmModelSelector } from "@shared/vsCodeSelectorUtils"
 import { fetchUnlokConnectedRepos, matchConnectedRepo } from "@/core/controller/account/unlokConnectedRepos"
+import { fetchUnlokMemoryIndex, fetchUnlokWorkspaceRules } from "@/core/controller/account/unlokMemory"
+import { buildUnlokContextSections } from "@/core/project/unlok-project-context"
 import { StateManager } from "@/core/storage/StateManager"
 import { HostProvider } from "@/hosts/host-provider"
 import { ExtensionRegistryInfo } from "@/registry"
@@ -1024,6 +1026,45 @@ export async function buildSessionConfig(input: SessionConfigInput): Promise<Cor
 		}
 	}
 
+	// The .unlok tiers and the memory index (docs/plans/2026-09-12-one-context-
+	// compaction-memory-and-unlok-folder.md). Rules from the workspace (Unlok
+	// only), the repo's UNLOK.md and .unlok/rules, and ~/.unlok/UNLOK.md go
+	// into every session, any provider. The memory index goes in on the first
+	// turn of a new task only: a resumed task already carried it. Failure of
+	// any part degrades to omitting that section, never to blocking the task.
+	let workspaceRulesVersionHeader: string | undefined
+	try {
+		const isNewTask = !input.historyItem
+		const unlokKey = isUnlokRoutedProvider && apiKey ? apiKey : undefined
+		const [rulesResult, memoryIndex] = await Promise.all([
+			unlokKey ? fetchUnlokWorkspaceRules(unlokKey) : Promise.resolve({ rules: [], version: "0", available: false }),
+			unlokKey && isNewTask ? fetchUnlokMemoryIndex(unlokKey) : Promise.resolve([]),
+		])
+		// Every completion in this session says which rules version it carried
+		// (X-Unlok-Rules-Version), so the Requests page can show it.
+		if (unlokKey && rulesResult.version !== "0") {
+			workspaceRulesVersionHeader = rulesResult.version
+		}
+		const sections = await buildUnlokContextSections({
+			root: workspaceRoot,
+			workspaceRules: rulesResult.rules,
+			memoryIndex,
+			isNewTask,
+		})
+		for (const section of [sections.rules, sections.memoryIndex]) {
+			if (section) {
+				systemPrompt = `${systemPrompt}\n\n${section}`
+			}
+		}
+		if (sections.effective.rules.length > 0 || memoryIndex.length > 0) {
+			Logger.log(
+				`[SessionFactory] Unlok context: ${sections.effective.rules.length} rules, ${isNewTask ? memoryIndex.length : 0} memory index entries, rules version ${rulesResult.version}`,
+			)
+		}
+	} catch (error) {
+		Logger.warn("[SessionFactory] Failed to inject Unlok rules and memory index:", error)
+	}
+
 	const stateManager = StateManager.get()
 	// Auto compact is on by default; keep this fallback aligned with the
 	// `useAutoCondense` default in shared/storage/state-keys.ts.
@@ -1080,6 +1121,7 @@ export async function buildSessionConfig(input: SessionConfigInput): Promise<Cor
 		// straight from providerConfig — notably the compaction summarizer, which
 		// otherwise falls back to a small default output cap (CLINE-2911).
 		...(maxTokensPerTurn !== undefined ? { maxOutputTokens: maxTokensPerTurn } : {}),
+		...(workspaceRulesVersionHeader ? { headers: { "X-Unlok-Rules-Version": workspaceRulesVersionHeader } } : {}),
 		fetch,
 	}
 

@@ -56,31 +56,60 @@ export async function fetchUnlokMemoryIndex(apiKey: string): Promise<UnlokMemory
 	}
 }
 
-export async function fetchUnlokWorkspaceRules(apiKey: string): Promise<UnlokWorkspaceRuleRow[]> {
+export interface UnlokWorkspaceRulesResult {
+	rules: UnlokWorkspaceRuleRow[]
+	/** A short hash of the rules that apply to the extension; "0" when there are none. */
+	version: string
+	/** False on a personal key: rules are a Team plan feature. */
+	available: boolean
+}
+
+const EMPTY_RULES: UnlokWorkspaceRulesResult = { rules: [], version: "0", available: false }
+
+// One entry per key: the last answer and its ETag, so the minute by minute
+// refresh is a conditional request the backend answers with a 304.
+const rulesCache = new Map<string, { etag: string; result: UnlokWorkspaceRulesResult }>()
+
+/** The rules that apply to the extension, via the one contract every product uses. */
+export async function fetchUnlokWorkspaceRules(apiKey: string): Promise<UnlokWorkspaceRulesResult> {
+	const cached = rulesCache.get(apiKey)
 	try {
-		const response = await axios.get(`${UNLOK_BASE_URL}/me/rules`, {
-			headers: headers(apiKey),
-			// Only the rules meant for the extension; browser agent and Optimus rules stay out of the prompt.
+		const response = await axios.get(`${UNLOK_BASE_URL}/rules`, {
+			headers: { ...headers(apiKey), ...(cached ? { "If-None-Match": cached.etag } : {}) },
 			params: { surface: "extension" },
 			timeout: 8_000,
+			validateStatus: (status) => status === 200 || status === 304,
 			...getAxiosSettings(),
 		})
-		const rules = (response.data as { rules?: unknown[] } | undefined)?.rules
-		return Array.isArray(rules)
-			? rules.map((e) => {
+		if (response.status === 304 && cached) {
+			return cached.result
+		}
+		const data = (response.data ?? {}) as Record<string, unknown>
+		const rules = Array.isArray(data.rules)
+			? (data.rules as unknown[]).map((e) => {
 					const r = e as Record<string, unknown>
 					return {
 						id: String(r.id ?? ""),
-						kind: r.kind === "policy" ? "policy" : "instruction",
+						kind: r.kind === "policy" ? ("policy" as const) : ("instruction" as const),
 						title: String(r.title ?? ""),
 						body: String(r.body ?? ""),
 						enforced: Boolean(r.enforced),
 					}
 				})
 			: []
+		const result: UnlokWorkspaceRulesResult = {
+			rules,
+			version: typeof data.version === "string" && data.version ? data.version : "0",
+			available: data.available !== false,
+		}
+		const etag = String(response.headers?.etag ?? "").trim()
+		if (etag) {
+			rulesCache.set(apiKey, { etag, result })
+		}
+		return result
 	} catch (error) {
 		Logger.warn("[UnlokMemory] Could not load workspace rules:", error)
-		return []
+		return cached?.result ?? EMPTY_RULES
 	}
 }
 

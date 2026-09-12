@@ -51,7 +51,7 @@ export class UnlokProjectCoordinator {
 	private readonly dismissedNow = new Set<string>()
 	/** One card per folder per session; a task restart must not repeat it. */
 	private readonly shownFor = new Set<string>()
-	private rulesCache: { apiKey: string; at: number; rules: Awaited<ReturnType<typeof fetchUnlokWorkspaceRules>> } | undefined
+	private rulesCache: { apiKey: string; at: number; result: Awaited<ReturnType<typeof fetchUnlokWorkspaceRules>> } | undefined
 
 	constructor(private readonly options: UnlokProjectCoordinatorOptions) {}
 
@@ -92,17 +92,21 @@ export class UnlokProjectCoordinator {
 	}
 
 	/** Cached for a minute: the session factory asks on every session build. */
-	async workspaceRules(): Promise<Awaited<ReturnType<typeof fetchUnlokWorkspaceRules>>> {
+	async workspaceRulesResult(): Promise<Awaited<ReturnType<typeof fetchUnlokWorkspaceRules>>> {
 		const apiKey = this.apiKey()
 		if (!apiKey || !this.activeIsUnlok()) {
-			return []
+			return { rules: [], version: "0", available: false }
 		}
 		if (this.rulesCache && this.rulesCache.apiKey === apiKey && Date.now() - this.rulesCache.at < WORKSPACE_RULES_TTL_MS) {
-			return this.rulesCache.rules
+			return this.rulesCache.result
 		}
-		const rules = await fetchUnlokWorkspaceRules(apiKey)
-		this.rulesCache = { apiKey, at: Date.now(), rules }
-		return rules
+		const result = await fetchUnlokWorkspaceRules(apiKey)
+		this.rulesCache = { apiKey, at: Date.now(), result }
+		return result
+	}
+
+	async workspaceRules(): Promise<Awaited<ReturnType<typeof fetchUnlokWorkspaceRules>>["rules"]> {
+		return (await this.workspaceRulesResult()).rules
 	}
 
 	/**
@@ -181,11 +185,16 @@ export class UnlokProjectCoordinator {
 		}
 	}
 
-	async effectiveRules(): Promise<{ status: UnlokProjectStatus; effective: EffectiveRules }> {
+	async effectiveRules(): Promise<{
+		status: UnlokProjectStatus
+		effective: EffectiveRules
+		workspaceRulesVersion: string
+		workspaceRulesAvailable: boolean
+	}> {
 		const root = await this.options.getWorkspaceRoot()
-		const [status, rules] = await Promise.all([detectUnlokProject(root), this.workspaceRules()])
-		const effective = await loadEffectiveRules(root, rules)
-		return { status, effective }
+		const [status, result] = await Promise.all([detectUnlokProject(root), this.workspaceRulesResult()])
+		const effective = await loadEffectiveRules(root, result.rules)
+		return { status, effective, workspaceRulesVersion: result.version, workspaceRulesAvailable: result.available }
 	}
 
 	/** "/remember <text>": saves a fact and confirms in chat. */

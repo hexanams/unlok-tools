@@ -6,7 +6,7 @@ const EXCERPT_CHARS = 240
 
 /** Every rule the next task will load, with its source, for the Settings › Rules view. */
 export async function getUnlokEffectiveRules(controller: Controller, _request: EmptyRequest): Promise<UnlokEffectiveRules> {
-	const { status, effective } = await controller.unlokProject.effectiveRules()
+	const { status, effective, workspaceRulesVersion, workspaceRulesAvailable } = await controller.unlokProject.effectiveRules()
 	return UnlokEffectiveRules.create({
 		rules: effective.rules.map((rule) =>
 			UnlokEffectiveRule.create({
@@ -24,5 +24,7 @@ export async function getUnlokEffectiveRules(controller: Controller, _request: E
 		boundTeamId: status.settings?.workspace?.teamId ?? "",
 		problems: status.problems,
 		overridden: effective.overridden.map((o) => `${o.title}: ${o.was} overridden by ${o.by}`),
+		workspaceRulesVersion,
+		workspaceRulesAvailable,
 	})
 }

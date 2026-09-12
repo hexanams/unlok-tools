@@ -154,6 +154,8 @@ message UnlokEffectiveRules {
   string bound_team_id = 5;
   repeated string problems = 6; // what a doctor would report
   repeated string overridden = 7; // "title: repo overridden by personal"
+  string workspace_rules_version = 8; // "0" when none
+  bool workspace_rules_available = 9; // false on a personal key: rules are a Team plan feature
 }
 
 message UnlokWorkspaceModel {

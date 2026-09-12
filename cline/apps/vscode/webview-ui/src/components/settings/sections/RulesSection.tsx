@@ -16,6 +16,8 @@ type Loaded = {
 	boundWorkspaceName: string
 	problems: string[]
 	overridden: string[]
+	workspaceRulesVersion: string
+	workspaceRulesAvailable: boolean
 }
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -46,6 +48,8 @@ const RulesSection = ({ renderSectionHeader }: RulesSectionProps) => {
 				boundWorkspaceName: result.boundWorkspaceName,
 				problems: result.problems ?? [],
 				overridden: result.overridden ?? [],
+				workspaceRulesVersion: result.workspaceRulesVersion ?? "0",
+				workspaceRulesAvailable: Boolean(result.workspaceRulesAvailable),
 			})
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err))
@@ -93,6 +97,11 @@ const RulesSection = ({ renderSectionHeader }: RulesSectionProps) => {
 									{p}
 								</span>
 							))}
+							<span>
+								{data.workspaceRulesAvailable
+									? `Workspace rules version ${data.workspaceRulesVersion}, sent with every request.`
+									: "Workspace rules are part of the Team plan. This key is on a personal workspace, so only repository and personal rules apply here."}
+							</span>
 						</div>
 					)}
 					{data && !data.initialized && (

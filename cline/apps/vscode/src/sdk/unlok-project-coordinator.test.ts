@@ -8,7 +8,7 @@ vi.mock("@/shared/services/Logger", () => ({
 	Logger: { debug: vi.fn(), error: vi.fn(), log: vi.fn(), warn: vi.fn() },
 }))
 vi.mock("@/core/controller/account/unlokMemory", () => ({
-	fetchUnlokWorkspaceRules: vi.fn().mockResolvedValue([]),
+	fetchUnlokWorkspaceRules: vi.fn().mockResolvedValue({ rules: [], version: "0", available: false }),
 	rememberUnlokFact: vi.fn().mockResolvedValue({ id: "f1", title: "Use bun", kind: "feedback" }),
 }))
 const setupPrefs = { never: [] as string[] }
