@@ -6,7 +6,7 @@ import { getAxiosSettings } from "@/shared/net"
 import { Logger } from "@/shared/services/Logger"
 import type { Controller } from "../index"
 import { parseConnectedRepos } from "./unlokConnectedRepos"
-import { backfillUnlokWorkspaceIdentity, clearUnlokWorkspaceError } from "./unlokWorkspaces"
+import { backfillUnlokWorkspaceIdentity, clearUnlokWorkspaceError, markUnlokWorkspaceRevoked } from "./unlokWorkspaces"
 
 // Same URL the SDK's builtin Unlok provider config uses for chat completions
 // (sdk/packages/llms/src/providers/builtins.ts) -- duplicated rather than
@@ -73,6 +73,13 @@ export async function getUnlokWorkspaceInfo(controller: Controller, _request: Em
 			connectedRepos: parseConnectedRepos(data),
 		})
 	} catch (error) {
+		// A 401 means this entry's key was revoked server side (a reconnect
+		// from another machine, or a revoke in the dashboard). Record it so the
+		// Account list shows the row as dead instead of merely "loading".
+		const status = (error as { response?: { status?: number } } | undefined)?.response?.status
+		if (status === 401) {
+			markUnlokWorkspaceRevoked(controller.stateManager)
+		}
 		Logger.error(`Failed to fetch Unlok workspace info: ${error}`)
 		throw error
 	}

@@ -265,10 +265,17 @@ export interface UnlokWorkspaceIdentity {
 }
 
 /**
- * Once GET /v1/me has answered for the active entry, fill in whatever the
- * entry is missing. An entry adopted from a pasted key, or from the single
- * key that predates this list, starts with no email and the generic name;
- * the backend knows which workspace the key really belongs to.
+ * Once GET /v1/me has answered for the active entry, the backend has told us
+ * which workspace that key really belongs to, and that is authoritative:
+ * the entry takes that email, team and name. An entry adopted from a pasted
+ * key, or from the single key that predates this list, starts with no email
+ * and the generic name, so this is how it gets labelled.
+ *
+ * Then any OTHER entry for the same workspace (same team and email) is a
+ * duplicate and is dropped: the active entry's key just worked, the other
+ * one is at best an older key for the same place. An earlier bug left
+ * exactly that behind, a generic "Workspace" row holding the live team key
+ * next to a "My+team" row holding a stale one.
  */
 export function backfillUnlokWorkspaceIdentity(store: UnlokWorkspaceStore, identity: UnlokWorkspaceIdentity): void {
 	const data = loadUnlokWorkspaces(store)
@@ -281,17 +288,32 @@ export function backfillUnlokWorkspaceIdentity(store: UnlokWorkspaceStore, ident
 		active.email = identity.email
 		changed = true
 	}
-	if (active.workspaceName === FALLBACK_WORKSPACE_NAME || !active.workspaceName) {
-		const name = identity.workspaceName.trim() || (identity.teamId ? FALLBACK_WORKSPACE_NAME : "Personal")
-		if (name !== active.workspaceName || active.teamId !== identity.teamId) {
-			active.workspaceName = name
-			active.teamId = identity.teamId
+	const name = identity.workspaceName.trim() || (identity.teamId ? FALLBACK_WORKSPACE_NAME : "Personal")
+	if (active.teamId !== identity.teamId) {
+		active.teamId = identity.teamId
+		changed = true
+	}
+	if (active.workspaceName !== name && (identity.workspaceName.trim() || isGenericLabel(active))) {
+		active.workspaceName = name
+		changed = true
+	}
+	if (active.email) {
+		const before = data.workspaces.length
+		data.workspaces = data.workspaces.filter(
+			(w) => w.id === active.id || w.teamId !== active.teamId || w.email !== active.email,
+		)
+		if (data.workspaces.length !== before) {
 			changed = true
 		}
 	}
 	if (changed) {
 		persist(store, data)
 	}
+}
+
+/** GET /v1/me answered 401 for the active entry: its key is dead. */
+export function markUnlokWorkspaceRevoked(store: UnlokWorkspaceStore): void {
+	markUnlokWorkspaceError(store, "This connection was revoked. Reconnect it, or remove it.")
 }
 
 /** What the webview gets: every field except the key. */

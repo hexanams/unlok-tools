@@ -143,12 +143,58 @@ describe("unlokWorkspaces", () => {
 		expect(config().unlokApiKey).toBe("k-team")
 	})
 
-	it("names an adopted entry after the workspace /v1/me reports, but never renames one that already has a real name", () => {
+	it("labels an adopted entry from what /v1/me reports, and keeps following the backend's answer", () => {
 		const { store } = fakeStore({ unlokApiKey: "k-adopted" })
 		backfillUnlokWorkspaceIdentity(store, { email: "me@acme.dev", teamId: "t9", workspaceName: "Ops" })
 		expect(summarizeUnlokWorkspaces(store)[0]).toEqual(expect.objectContaining({ workspaceName: "Ops", teamId: "t9" }))
+		// The backend is authoritative about which workspace a key belongs to.
 		backfillUnlokWorkspaceIdentity(store, { email: "me@acme.dev", teamId: "", workspaceName: "Personal" })
-		expect(summarizeUnlokWorkspaces(store)[0].workspaceName).toBe("Ops")
+		expect(summarizeUnlokWorkspaces(store)[0]).toEqual(expect.objectContaining({ workspaceName: "Personal", teamId: "" }))
+	})
+
+	it("merges a generic row into the named row for the same workspace once /v1/me identifies it, keeping the working key", () => {
+		// The exact leftover seen live: "Workspace" (no email) holding the live
+		// team key and active, next to "My+team" holding a stale key.
+		const legacy = {
+			activeId: "generic",
+			workspaces: [
+				{
+					id: "personal",
+					apiKey: "k-personal",
+					email: "me@acme.dev",
+					workspaceName: "Personal",
+					teamId: "",
+					addedAt: 1,
+					lastError: "",
+				},
+				{
+					id: "named",
+					apiKey: "k-team-stale",
+					email: "me@acme.dev",
+					workspaceName: "My+team",
+					teamId: "t1",
+					addedAt: 2,
+					lastError: "",
+				},
+				{
+					id: "generic",
+					apiKey: "k-team-live",
+					email: "",
+					workspaceName: "Workspace",
+					teamId: "",
+					addedAt: 3,
+					lastError: "x",
+				},
+			],
+		}
+		const { store, config } = fakeStore({ unlokApiKey: "k-team-live", unlokWorkspaces: JSON.stringify(legacy) })
+		backfillUnlokWorkspaceIdentity(store, { email: "me@acme.dev", teamId: "t1", workspaceName: "My+team" })
+		const summaries = summarizeUnlokWorkspaces(store)
+		expect(summaries.map((w) => [w.workspaceName, w.active])).toEqual([
+			["Personal", false],
+			["My+team", true],
+		])
+		expect(config().unlokApiKey).toBe("k-team-live")
 	})
 
 	it("records a failure on the active workspace and clears it on success, never exposing keys to the webview", () => {
