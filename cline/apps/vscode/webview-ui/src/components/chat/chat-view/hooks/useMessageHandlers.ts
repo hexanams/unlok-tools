@@ -7,6 +7,7 @@ import { IntentEvent } from "@shared/proto/cline/ui"
 import { useCallback, useRef } from "react"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import {
+	AccountServiceClient,
 	OptimusServiceClient,
 	PlanServiceClient,
 	SlashServiceClient,
@@ -179,6 +180,23 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 			// with a fresh, summarized context) without the legacy new_task tool.
 			// With no active task there is nothing to compact, so fall through to
 			// normal new-task handling.
+			// "/remember <fact>": saved to the workspace's memory bank, never sent
+			// to the model. The confirmation arrives as an info row from the host.
+			const rememberCommand = /^\/remember(?:\s+([\s\S]+))?$/.exec(messageToSend.trim())
+			if (rememberCommand) {
+				const fact = rememberCommand[1]?.trim()
+				if (!fact) {
+					setInputValue("/remember ")
+					return
+				}
+				setInputValue("")
+				setActiveQuote(null)
+				await AccountServiceClient.rememberUnlokFact(StringRequest.create({ value: fact })).catch((err) =>
+					console.error("Failed to remember:", err),
+				)
+				return
+			}
+
 			// Anything typed after the command ("/compact keep the migration
 			// numbers") is a focus for the summarizer, passed through as-is.
 			const compactCommand = /^\/(compact|smol|newtask)(?:\s+([\s\S]+))?$/.exec(messageToSend.trim())

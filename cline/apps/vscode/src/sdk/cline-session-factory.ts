@@ -37,8 +37,8 @@ import type { Settings } from "@shared/storage/state-keys"
 import type { Mode } from "@shared/storage/types"
 import { reasoningEffortFromThinkingBudget } from "@shared/utils/reasoning-support"
 import { stringifyVsCodeLmModelSelector } from "@shared/vsCodeSelectorUtils"
-import { StateManager } from "@/core/storage/StateManager"
 import { fetchUnlokConnectedRepos, matchConnectedRepo } from "@/core/controller/account/unlokConnectedRepos"
+import { StateManager } from "@/core/storage/StateManager"
 import { HostProvider } from "@/hosts/host-provider"
 import { ExtensionRegistryInfo } from "@/registry"
 import { getDistinctId } from "@/services/logging/distinctId"
@@ -1007,7 +1007,9 @@ export async function buildSessionConfig(input: SessionConfigInput): Promise<Cor
 				const connectedRepos = await fetchUnlokConnectedRepos(apiKey)
 				const match = matchConnectedRepo(remoteLines, connectedRepos)
 				if (match) {
-					const parts = [`# Connected Repository Context\n\nThis workspace is "${match.fullName}", connected via Unlok's Integrations page.`]
+					const parts = [
+						`# Connected Repository Context\n\nThis workspace is "${match.fullName}", connected via Unlok's Integrations page.`,
+					]
 					if (match.languagesSummary) {
 						parts.push(`Detected stack: ${match.languagesSummary}.`)
 					}

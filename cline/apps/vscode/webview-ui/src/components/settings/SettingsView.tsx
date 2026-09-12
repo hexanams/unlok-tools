@@ -9,6 +9,7 @@ import {
 	HardDriveDownload,
 	Info,
 	type LucideIcon,
+	ScrollText,
 	SlidersHorizontal,
 	SquareTerminal,
 	Wrench,
@@ -31,12 +32,22 @@ import DebugSection from "./sections/DebugSection"
 import FeatureSettingsSection from "./sections/FeatureSettingsSection"
 import GeneralSettingsSection from "./sections/GeneralSettingsSection"
 import { RemoteConfigSection } from "./sections/RemoteConfigSection"
+import RulesSection from "./sections/RulesSection"
 import TerminalSettingsSection from "./sections/TerminalSettingsSection"
 
 const IS_DEV = process.env.IS_DEV
 
 // Tab definitions
-type SettingsTabID = "api-config" | "features" | "terminal" | "general" | "account" | "about" | "debug" | "remote-config"
+type SettingsTabID =
+	| "api-config"
+	| "features"
+	| "terminal"
+	| "general"
+	| "rules"
+	| "account"
+	| "about"
+	| "debug"
+	| "remote-config"
 interface SettingsTab {
 	id: SettingsTabID
 	name: string
@@ -74,6 +85,13 @@ const SETTINGS_TABS: SettingsTab[] = [
 		tooltipText: "General Settings",
 		headerText: "General Settings",
 		icon: Wrench,
+	},
+	{
+		id: "rules",
+		name: "Rules",
+		tooltipText: "Rules every task in this folder loads",
+		headerText: "Rules",
+		icon: ScrollText,
 	},
 	{
 		id: "remote-config",
@@ -137,6 +155,7 @@ const SettingsView = ({ onDone, targetSection }: SettingsViewProps) => {
 		() => ({
 			"api-config": ApiConfigurationSection,
 			general: GeneralSettingsSection,
+			rules: RulesSection,
 			features: FeatureSettingsSection,
 			terminal: TerminalSettingsSection,
 			"remote-config": RemoteConfigSection,

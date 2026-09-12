@@ -48,6 +48,7 @@ import { findMatchingResourceOrTemplate } from "@/utils/mcp"
 import CodeAccordian, { cleanPathPrefix } from "../common/CodeAccordian"
 import { CommandOutputContent, CommandOutputRow } from "./CommandOutputRow"
 import CompactionRow from "./CompactionRow"
+import UnlokProjectCard from "./UnlokProjectCard"
 import { CompletionOutputRow } from "./CompletionOutputRow"
 import { DiffEditRow } from "./DiffEditRow"
 import ErrorRow from "./ErrorRow"
@@ -1024,6 +1025,8 @@ export const ChatRowContent = memo(
 						return <InvisibleSpacer /> // task_progress messages should be displayed in TaskHeader only, not in chat
 					case "compaction":
 						return <CompactionRow message={message} />
+					case "unlok_project":
+						return <UnlokProjectCard text={message.text} />
 					default:
 						return (
 							<div>

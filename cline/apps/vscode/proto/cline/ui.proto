@@ -76,6 +76,7 @@ enum ClineSay {
   SUBAGENT_USAGE = 36;
   COMPACTION = 37;
   PLAN_COMPLETION_RESULT = 38;
+  UNLOK_PROJECT = 39; // .unlok setup or workspace binding card, text is JSON (see UnlokProjectCard)
 }
 
 // Enum for ClineSayTool tool types

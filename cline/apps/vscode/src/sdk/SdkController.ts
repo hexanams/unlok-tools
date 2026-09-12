@@ -19,6 +19,7 @@ import {
 	setTelemetryOptOutGlobally,
 	type UserInstructionConfigService,
 } from "@cline/core"
+import type { Message as SdkMessage } from "@cline/llms"
 import { formatDisplayUserInput, type RemoteConfig, type RemoteConfigBundle } from "@cline/shared"
 import type { ApiConfiguration } from "@shared/api"
 import type { ChatContent } from "@shared/ChatContent"
@@ -31,6 +32,12 @@ import type { Settings } from "@shared/storage/state-keys"
 import type { Mode } from "@shared/storage/types"
 import type { TelemetrySetting } from "@shared/TelemetrySetting"
 import type { ClineCheckpointRestore } from "@shared/WebviewMessage"
+import { closeUnlokSession } from "@/core/controller/account/unlokMemory"
+import {
+	setActiveUnlokWorkspace as activateStoredUnlokWorkspace,
+	removeUnlokWorkspace as removeStoredUnlokWorkspace,
+	summarizeUnlokWorkspaces,
+} from "@/core/controller/account/unlokWorkspaces"
 import { parseMentions } from "@/core/mentions"
 import { ensureMcpServersDirectoryExists } from "@/core/storage/disk"
 import { clearSdkRemoteConfig, refreshSdkRemoteConfig } from "@/core/storage/remote-config/sdk-refresh"
@@ -39,6 +46,7 @@ import { WorkspaceRootManager } from "@/core/workspace/WorkspaceRootManager"
 import { HostProvider } from "@/hosts/host-provider"
 import { VscodeTerminalManager } from "@/hosts/vscode/terminal/VscodeTerminalManager"
 import { ExtensionRegistryInfo } from "@/registry"
+import type { UnlokCallbackDetails } from "@/sdk/auth-service"
 import { OcaAuthService } from "@/services/auth/oca/OcaAuthService"
 import { UrlContentFetcher } from "@/services/browser/UrlContentFetcher"
 import { ClineError } from "@/services/error/ClineError"
@@ -54,12 +62,6 @@ import { ClineAccountService } from "./account-service"
 import { AuthService, LogoutReason } from "./auth-service"
 import { BUILTIN_SLASH_COMMANDS } from "./builtin-slash-commands"
 import { buildStartSessionInput, createHistoryItemFromSession } from "./cline-session-factory"
-import {
-	removeUnlokWorkspace as removeStoredUnlokWorkspace,
-	setActiveUnlokWorkspace as activateStoredUnlokWorkspace,
-	summarizeUnlokWorkspaces,
-} from "@/core/controller/account/unlokWorkspaces"
-import type { UnlokCallbackDetails } from "@/sdk/auth-service"
 import { MessageTranslatorState, reshapeErrorForWebview } from "./message-translator"
 import { createProviderCatalog } from "./model-catalog/catalog"
 import type { Disposable, ProviderCatalog, ProviderConfigChange, ProviderConfigStore } from "./model-catalog/contracts"
@@ -110,6 +112,8 @@ import { StatePostDebouncer } from "./state-post-debouncer"
 import { createTaskProxy, type TaskProxy } from "./task-proxy"
 import { syncTelemetrySettingFromSharedGlobalSettings } from "./telemetry-settings-sync"
 import { TurnStateTracker } from "./turn-state-tracker"
+import { UnlokProjectCoordinator } from "./unlok-project-coordinator"
+import { UnlokSessionCloser } from "./unlok-session-close"
 import { createWorkspaceFileReadExecutor } from "./vscode-file-read-executor"
 import { VscodeSessionHost } from "./vscode-session-host"
 import type { VscodeTerminalExecutionMode } from "./vscode-terminal-execution-mode"
@@ -189,6 +193,10 @@ export class Controller {
 	private providerChanges: SdkProviderChangeCoordinator
 	private followups: SdkFollowupCoordinator
 	private taskControl: SdkTaskControlCoordinator
+	/** The .unlok folder: setup and binding cards, Initialize, effective rules, /remember. */
+	unlokProject: UnlokProjectCoordinator
+	/** Tells Unlok when a task is over so facts can be extracted from it. */
+	private unlokSessionCloser: UnlokSessionCloser
 	private taskStart: SdkTaskStartCoordinator
 	private compaction: SdkCompactionCoordinator
 	private sessionEvents: SdkSessionEventCoordinator
@@ -663,6 +671,35 @@ export class Controller {
 			getWorkspaceRoot: () => this.getWorkspaceRoot(),
 			postStateToWebview: () => this.postStateToWebview(),
 		})
+		this.unlokProject = new UnlokProjectCoordinator({
+			stateManager: this.stateManager,
+			sessions: this.sessions,
+			messages: this.messages,
+			getWorkspaceRoot: () => this.getWorkspaceRoot(),
+			postStateToWebview: () => this.postStateToWebview(),
+			sendFollowup: (prompt) => this.askResponse(prompt),
+		})
+		this.unlokSessionCloser = new UnlokSessionCloser({
+			getApiKey: () => {
+				try {
+					const apiConfig = this.stateManager.getApiConfiguration()
+					const mode = this.stateManager.getGlobalSettingsKey("mode") === "plan" ? "plan" : "act"
+					const provider = mode === "plan" ? apiConfig.planModeApiProvider : apiConfig.actModeApiProvider
+					const key = apiConfig.unlokApiKey
+					return provider === "unlok" && typeof key === "string" && key.trim() ? key : undefined
+				} catch {
+					return undefined
+				}
+			},
+			readMessages: async (sessionId) => {
+				const active = this.sessions.getActiveSession()
+				if (!active || active.sessionId !== sessionId) {
+					return undefined
+				}
+				return (await active.sdkHost.readMessages(sessionId)) as SdkMessage[]
+			},
+			postClose: (input) => closeUnlokSession(input),
+		})
 		this.sessionEvents = new SdkSessionEventCoordinator({
 			messageTranslatorState: this.messageTranslatorState,
 			sessions: this.sessions,
@@ -675,6 +712,13 @@ export class Controller {
 			getTurnPhase: () => this.turnStateTracker.currentPhase,
 			captureProviderApiError: (event) => this.captureProviderFailure(event),
 			beginProviderFailureTelemetryTurn: () => this.beginProviderFailureTelemetryTurn(),
+			onTurnSettled: (sessionId, outcome) => {
+				if (outcome === "completed") {
+					void this.unlokSessionCloser.close(sessionId, "completed")
+				} else {
+					this.unlokSessionCloser.scheduleIdleClose(sessionId)
+				}
+			},
 		})
 		// Subscribe to MCP tool list changes so we can restart the SDK session
 		// when servers are added/removed/reconnected. The SDK's DefaultSessionBuilder
@@ -1191,6 +1235,25 @@ export class Controller {
 	}
 
 	/**
+	 * True when `task` has a live backing session (running, or paused-but-alive
+	 * from a stop/abort) for the same taskId -- the two cases
+	 * SdkFollowupCoordinator.askResponse (sdk-followup-coordinator.ts:85,117)
+	 * delivers a follow-up into directly (queueToActiveSession /
+	 * continueIdleSession) without touching task history. `task` alone stays
+	 * truthy long after a task finishes, aborts, or errors -- it's only ever
+	 * cleared by an explicit clearTask() -- so a bare `if (controller.task)`
+	 * can't tell a genuinely resumable task from a stale, session-less one.
+	 * Delivering into the latter falls to tryResumeSessionFromTask, which
+	 * reconstructs from history and can land as a near-fresh session instead
+	 * of a true continuation. Used by /optimus's answer injection
+	 * (optimus/askOptimus.ts) to decide between that and postInfoMessage.
+	 */
+	isTaskLiveSessionActive(): boolean {
+		const activeSession = this.sessions.getActiveSession()
+		return !!this.task && !!activeSession && activeSession.sessionId === this.task.taskId
+	}
+
+	/**
 	 * Get the active API provider for the current mode.
 	 */
 	private getActiveProviderId(): string | undefined {
@@ -1428,11 +1491,21 @@ export class Controller {
 		taskSettings?: Partial<Settings>,
 	): Promise<string | undefined> {
 		await this.waitForInitialRemoteConfig()
+		// The task being replaced is over for Unlok: capture its transcript
+		// before clearTask ends the session, so facts can be extracted from it.
+		const replaced = this.sessions?.getActiveSession()?.sessionId
+		if (replaced) {
+			await this.unlokSessionCloser?.close(replaced, "replaced")
+		}
 		// A new task is starting — the agent is about to stream.
 		this.turnStateTracker.set("streaming")
 		// Clear the previous turn's completion signal so this turn's phase is computed fresh.
 		this.messageTranslatorState.clearTurnOutcome()
-		return this.taskStart.initTask(prompt, images, files, historyItem, taskSettings)
+		const sessionId = await this.taskStart.initTask(prompt, images, files, historyItem, taskSettings)
+		if (sessionId && !historyItem) {
+			void this.unlokProject?.afterTaskStarted(sessionId)
+		}
+		return sessionId
 	}
 
 	async reinitExistingTaskFromId(taskId: string): Promise<void> {
@@ -1502,6 +1575,10 @@ export class Controller {
 	}
 
 	async clearTask(): Promise<void> {
+		const cleared = this.sessions?.getActiveSession()?.sessionId
+		if (cleared) {
+			await this.unlokSessionCloser?.close(cleared, "cleared")
+		}
 		this.pendingClineAuthRetryPrompt = undefined
 		// No active task — UI returns to idle (input enabled, no buttons/thinking).
 		this.turnStateTracker.set("idle")
@@ -1523,6 +1600,7 @@ export class Controller {
 	 * return immediately so the webview stays responsive.
 	 */
 	async askResponse(prompt?: string, images?: string[], files?: string[]): Promise<void> {
+		this.unlokSessionCloser?.cancelIdleClose()
 		if (this.pendingClineAuthRetryPrompt !== undefined && this.task?.taskState?.askResponse === "yesButtonClicked") {
 			const retryPrompt = this.pendingClineAuthRetryPrompt
 			this.pendingClineAuthRetryPrompt = undefined

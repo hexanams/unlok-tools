@@ -10,8 +10,12 @@ const clearTask = vi.fn().mockResolvedValue(undefined)
 const condense = vi.fn().mockResolvedValue(undefined)
 const trackIntent = vi.fn().mockResolvedValue(undefined)
 const generatePlan = vi.fn().mockResolvedValue(undefined)
+const rememberUnlokFact = vi.fn().mockResolvedValue({ value: "Use bun" })
 
 vi.mock("@/services/grpc-client", () => ({
+	AccountServiceClient: {
+		rememberUnlokFact: (req: unknown) => rememberUnlokFact(req),
+	},
 	TaskServiceClient: {
 		newTask: (req: unknown) => newTask(req),
 		askResponse: (req: unknown) => askResponse(req),
@@ -150,6 +154,19 @@ describe("useMessageHandlers — send routing", () => {
 
 		expect(condense).toHaveBeenCalledTimes(1)
 		expect(condense).toHaveBeenCalledWith(expect.objectContaining({ value: "compact keep the migration numbers" }))
+		expect(newTask).not.toHaveBeenCalled()
+	})
+
+	it("saves /remember to the memory bank instead of sending it to the model", async () => {
+		mockTurnState = { phase: "completed", seq: 7 }
+		const { result } = renderHook(() => useMessageHandlers(completedConversation, makeChatState(completedConversation)))
+
+		await act(async () => {
+			await result.current.handleSendMessage("/remember Use bun, not npm, in this repo", [], [])
+		})
+
+		expect(rememberUnlokFact).toHaveBeenCalledWith(expect.objectContaining({ value: "Use bun, not npm, in this repo" }))
+		expect(askResponse).not.toHaveBeenCalled()
 		expect(newTask).not.toHaveBeenCalled()
 	})
 

@@ -40,6 +40,8 @@ export interface SdkSessionEventCoordinatorOptions {
 	getTurnPhase?: () => TurnPhase
 	captureProviderApiError?: (event: ProviderFailureTelemetry) => void
 	beginProviderFailureTelemetryTurn?: () => void
+	/** A turn ended cleanly: the completion tool was used, or the agent is waiting for the person. */
+	onTurnSettled?: (sessionId: string, outcome: "completed" | "awaiting_followup") => void
 }
 
 export class SdkSessionEventCoordinator {
@@ -126,9 +128,11 @@ export class SdkSessionEventCoordinator {
 				} else if (this.options.messageTranslatorState.wasAttemptCompletionSeen()) {
 					this.options.setTurnPhase?.("completed")
 					this.clearActiveUnlokWorkspaceFailure()
+					this.options.onTurnSettled?.(activeSession.sessionId, "completed")
 				} else {
 					this.options.setTurnPhase?.("awaiting_followup")
 					this.clearActiveUnlokWorkspaceFailure()
+					this.options.onTurnSettled?.(activeSession.sessionId, "awaiting_followup")
 				}
 
 				this.options.sessions.setRunning(false)

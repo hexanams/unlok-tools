@@ -281,6 +281,7 @@ export type ClineSay =
 	| "subagent_usage"
 	| "conditional_rules_applied"
 	| "compaction" // context compaction progress/result divider
+	| "unlok_project" // .unlok setup or workspace binding card; text is JSON (UnlokProjectCard)
 
 export interface ClineSayTool {
 	tool:

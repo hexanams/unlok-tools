@@ -58,6 +58,16 @@ service AccountService {
   rpc setActiveUnlokWorkspace(StringRequest) returns (Empty);
   rpc removeUnlokWorkspace(StringRequest) returns (Empty);
 
+  // The .unlok folder and curated memory (docs/plans/2026-09-12-one-context-compaction-memory-and-unlok-folder.md).
+  // Scaffolds UNLOK.md and .unlok/ in the open folder (binding it to the active team workspace) and starts the drafting turn.
+  rpc initializeUnlokProject(EmptyRequest) returns (Empty);
+  // "now" hides the setup card for this session; "never" remembers the folder in ~/.unlok.
+  rpc dismissUnlokProjectSetup(StringRequest) returns (Empty);
+  // Every rule the next task will load, with its source and whether it is enforced.
+  rpc getUnlokEffectiveRules(EmptyRequest) returns (UnlokEffectiveRules);
+  // "/remember <text>": saves a fact to the workspace's memory bank; returns its title.
+  rpc rememberUnlokFact(StringRequest) returns (String);
+
   // Returns a link the webview can use to redirect back to the user's IDE.
   rpc getRedirectUrl(EmptyRequest) returns (String);
 
@@ -125,6 +135,25 @@ message OrganizationCreditsData {
 
 message UserCreditsBalance {
   double current_balance = 1;
+}
+
+message UnlokEffectiveRule {
+  string title = 1;
+  string source = 2; // "workspace-enforced" | "workspace" | "repo" | "personal"
+  bool enforced = 3;
+  string excerpt = 4; // first lines of the body
+  string origin = 5; // file path, or "workspace:<id>"
+  string kind = 6; // "instruction" | "policy"
+}
+
+message UnlokEffectiveRules {
+  repeated UnlokEffectiveRule rules = 1;
+  bool initialized = 2; // UNLOK.md or .unlok/ exists in the open folder
+  string root = 3;
+  string bound_workspace_name = 4; // from .unlok/settings.json, empty when unbound
+  string bound_team_id = 5;
+  repeated string problems = 6; // what a doctor would report
+  repeated string overridden = 7; // "title: repo overridden by personal"
 }
 
 message UnlokWorkspaceModel {

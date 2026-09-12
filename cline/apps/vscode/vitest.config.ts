@@ -15,6 +15,7 @@ export default defineConfig({
 			"src/core/controller/account/setUserOrganization.test.ts",
 			"src/core/controller/account/getUnlokWorkspaceInfo.test.ts",
 			"src/core/controller/account/unlokWorkspaces.test.ts",
+			"src/core/project/**/*.test.ts",
 			"src/core/controller/remoteConfig/**/*.test.ts",
 			"src/core/controller/state/**/*.test.ts",
 			"src/core/controller/slash/**/*.test.ts",
