@@ -4,6 +4,35 @@ import { ModelPickerPopover } from "./ModelPickerPopover"
 
 const mockGetUnlokWorkspaceInfo = vi.fn()
 
+const navigateToSettingsMock = vi.fn()
+const extensionState = vi.hoisted(() => ({
+	value: {
+		unlokWorkspaces: [
+			{
+				id: "ws-team",
+				email: "me@acme.dev",
+				workspaceName: "My+team",
+				teamId: "t1",
+				active: true,
+				lastError: "",
+				addedAt: 1,
+			},
+			{
+				id: "ws-personal",
+				email: "me@acme.dev",
+				workspaceName: "Personal",
+				teamId: "",
+				active: false,
+				lastError: "",
+				addedAt: 2,
+			},
+		],
+	},
+}))
+vi.mock("@/context/ExtensionStateContext", () => ({
+	useExtensionState: () => ({ ...extensionState.value, navigateToSettings: navigateToSettingsMock }),
+}))
+
 vi.mock("@/services/grpc-client", () => ({
 	AccountServiceClient: {
 		getUnlokWorkspaceInfo: (...args: unknown[]) => mockGetUnlokWorkspaceInfo(...args),
@@ -131,5 +160,15 @@ describe("ModelPickerPopover", () => {
 		fireEvent.click(screen.getByTestId("model-picker-trigger"))
 		fireEvent.click(screen.getByTestId("model-picker-trigger"))
 		await waitFor(() => expect(mockGetUnlokWorkspaceInfo).toHaveBeenCalledTimes(2))
+	})
+	it("shows which workspace the pick applies to, with a Switch that opens the Account tab", async () => {
+		mockGetUnlokWorkspaceInfo.mockResolvedValueOnce({ accessMode: "unlok", models: [] })
+		render(<ModelPickerPopover currentModelId="auto" onSelect={vi.fn()} />)
+		fireEvent.click(screen.getByTestId("model-picker-trigger"))
+		const banner = screen.getByTestId("model-picker-workspace")
+		expect(banner.textContent).toContain("My+team")
+		expect(banner.textContent).toContain("me@acme.dev")
+		fireEvent.click(screen.getByText("Switch"))
+		expect(navigateToSettingsMock).toHaveBeenCalledWith("account")
 	})
 })

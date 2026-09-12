@@ -2,8 +2,10 @@ import { EmptyRequest } from "@shared/proto/cline/common"
 import type { UnlokWorkspaceModel } from "@shared/proto/cline/account"
 import { CheckIcon, SparklesIcon } from "lucide-react"
 import { useCallback, useState } from "react"
+import { unlokWorkspaceLabel } from "@/components/account/UnlokAccountView"
 import { Badge } from "@/components/ui/badge"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { useExtensionState } from "@/context/ExtensionStateContext"
 import { cn } from "@/lib/utils"
 import { AccountServiceClient } from "@/services/grpc-client"
 
@@ -36,6 +38,11 @@ export const ModelPickerPopover = ({ currentModelId, triggerLabel, onSelect }: M
 	const [accessMode, setAccessMode] = useState<string | undefined>(undefined)
 	const [models, setModels] = useState<UnlokWorkspaceModel[]>([])
 	const [error, setError] = useState<string | undefined>(undefined)
+	// Which workspace the pick applies to. Models and keys are per workspace,
+	// so a person choosing or pinning one must see which workspace they are
+	// choosing for; Switch jumps to the Account tab where the list lives.
+	const { unlokWorkspaces, navigateToSettings } = useExtensionState()
+	const activeWorkspace = unlokWorkspaces?.find((w) => w.active)
 
 	const handleOpenChange = useCallback(
 		(next: boolean) => {
@@ -74,6 +81,28 @@ export const ModelPickerPopover = ({ currentModelId, triggerLabel, onSelect }: M
 			</PopoverTrigger>
 			<PopoverContent align="end" className="w-72 p-1" showArrow={false} side="top">
 				<div className="px-2 pt-1 pb-1.5 text-xs font-semibold text-foreground">Model</div>
+				{activeWorkspace && (
+					<div
+						className="mx-1 mb-1.5 flex items-center gap-2 rounded-xs border border-input-border bg-input-background/40 px-2 py-1.5"
+						data-testid="model-picker-workspace">
+						<span className="size-1.5 shrink-0 rounded-full bg-cline" />
+						<span className="min-w-0 flex-1 truncate text-[11px] text-description">
+							Workspace: <span className="font-medium text-foreground">{unlokWorkspaceLabel(activeWorkspace)}</span>
+							{activeWorkspace.email ? ` · ${activeWorkspace.email}` : ""}
+						</span>
+						{unlokWorkspaces && unlokWorkspaces.length > 1 && (
+							<button
+								className="shrink-0 cursor-pointer text-[11px] text-cline hover:underline"
+								onClick={() => {
+									setOpen(false)
+									navigateToSettings("account")
+								}}
+								type="button">
+								Switch
+							</button>
+						)}
+					</div>
+				)}
 
 				<button
 					className={cn(
