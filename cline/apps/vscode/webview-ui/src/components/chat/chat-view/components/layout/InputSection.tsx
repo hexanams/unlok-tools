@@ -1,5 +1,6 @@
 import React from "react"
 import ChatTextArea from "@/components/chat/ChatTextArea"
+import OptimusAskingIndicator from "@/components/chat/OptimusAskingIndicator"
 import OptimusModeBanner from "@/components/chat/OptimusModeBanner"
 import QuotedMessagePreview from "@/components/chat/QuotedMessagePreview"
 import { useExtensionState } from "@/context/ExtensionStateContext"
@@ -82,20 +83,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
 				</div>
 			)}
 
-			{isAskingOptimus && (
-				<div
-					style={{
-						display: "flex",
-						alignItems: "center",
-						gap: "6px",
-						margin: "10px 15px 6px 15px",
-						fontSize: "var(--vscode-editor-font-size)",
-						opacity: 0.9,
-					}}>
-					<span className="codicon codicon-loading codicon-modifier-spin" />
-					<span>Asking Optimus…</span>
-				</div>
-			)}
+			{isAskingOptimus && <OptimusAskingIndicator />}
 
 			<ChatTextArea
 				activeQuote={activeQuote}

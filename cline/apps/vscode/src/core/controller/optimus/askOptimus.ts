@@ -41,15 +41,20 @@ async function resolveUserId(apiKey: string): Promise<string> {
  * the account's (or pooled team's, per the backend's own role-based grant)
  * already-digested Optimus memory. Mirrors generatePlan.ts's call shape.
  *
- * If a task is actively running (controller.task is set), the answer is
- * fed into that task's own live conversation via handleWebviewAskResponse
- * -- the same path a real typed follow-up goes through, including one sent
- * mid-stream (see useMessageHandlers.ts's "queued/steering feedback"
- * handling) -- so the agent's own next step actually reflects what was
- * just learned, not just a note left for the human. With no active task,
- * it falls back to postInfoMessage, the same display-only path a
- * compaction result or a hook status update uses. Either way the proto
- * response is still returned for the caller/tests.
+ * If a task is actively running (controller.isTaskLiveSessionActive()), the
+ * answer is fed into that task's own live conversation via
+ * handleWebviewAskResponse -- the same path a real typed follow-up goes
+ * through, including one sent mid-stream (see useMessageHandlers.ts's
+ * "queued/steering feedback" handling) -- so the agent's own next step
+ * actually reflects what was just learned, not just a note left for the
+ * human. `controller.task` alone isn't enough to gate on: it stays truthy
+ * long after a task finishes, aborts, or errors (only clearTask() resets
+ * it), and delivering into a task with no live backing session forces a
+ * reconstruction from history that can land as a near-fresh session instead
+ * of a real continuation -- see isTaskLiveSessionActive's own comment.
+ * With no genuinely active task, this falls back to postInfoMessage, the
+ * same display-only path a compaction result or a hook status update uses.
+ * Either way the proto response is still returned for the caller/tests.
  */
 export async function askOptimus(controller: Controller, request: AskOptimusRequest): Promise<OptimusAnswer> {
 	const apiConfiguration = controller.stateManager.getApiConfiguration()
@@ -79,7 +84,7 @@ export async function askOptimus(controller: Controller, request: AskOptimusRequ
 			fromCachedDigest: Boolean(data.from_cached_digest ?? false),
 		})
 
-		if (controller.task) {
+		if (controller.task && controller.isTaskLiveSessionActive()) {
 			// A real turn in the live conversation, not a display-only note --
 			// this is deliberately NOT also calling postInfoMessage, since
 			// messageResponse already renders as a normal chat turn (the same
