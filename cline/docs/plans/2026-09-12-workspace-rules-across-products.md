@@ -6,7 +6,7 @@ Workspace rules shipped on 2026-09-12 as a team owned list (`team_rules`) with a
 
 Three things stand in the way of "every product loads its rules" being one piece of work rather than three:
 
-1. **Personal workspaces have no server side rules.** A rule is a `team_rules` row, so a person on the personal workspace has nothing the Browser Agent or Optimus could load. The extension covers the personal tier with a file on disk, which a Chrome extension and a server side answerer cannot read.
+1. **Rules are a Team plan feature, and the products must say so.** A rule is a `team_rules` row. A personal workspace has none, by design, and the Browser Agent on a device account or a personal Unlok account therefore runs without workspace rules until it is connected to a team. Each product needs one honest, cheap answer for that case (the backend now returns `available: false, reason: team_plan`) rather than a silent empty list.
 2. **Each product would render the prompt block itself.** The extension has `renderRulesSection`; the Browser Agent and Optimus would each need their own copy of "enforced first, then the rest, each with its source". Three renderers drift.
 3. **Nothing says which version of the rules a request ran under.** When a member reports that the agent ignored a policy, there is no way to tell whether the rule was even loaded at the time.
 
@@ -14,7 +14,7 @@ The plan below fixes those first, then adds the two loaders. Every product ends 
 
 ## Principles
 
-- **One source.** Rules live on the server, per workspace, personal or team. Local tiers (repository, `~/.unlok`) stay extension only, layered on top by the merge that already exists.
+- **One source.** Rules live on the server, per team workspace (a Team plan feature). Local tiers (repository, `~/.unlok`) stay extension only, layered on top by the merge that already exists, and work for everyone.
 - **One contract.** `GET /v1/rules?surface=<name>` for every product, API key or dashboard session, with a version and an ETag.
 - **One renderer.** The server returns the prompt block ready to paste. Products with no local tiers paste it. The extension still merges its local tiers but uses the same block for the workspace tier.
 - **Enforcement in code where it can be.** A policy is text first, and later a typed policy some products can enforce mechanically. The text is never dropped, so a product that cannot enforce a type still tells the model.
@@ -24,7 +24,7 @@ The plan below fixes those first, then adds the two loaders. Every product ends 
 
 **Backend**
 
-- `team_rules` gains `user_id` (nullable) and a check constraint that exactly one of `team_id`, `user_id` is set (migration 0044). The table keeps its name; the model gets a `workspace` view. Personal workspace rules are the person's own rows.
+- Rules stay team owned. No personal rows: a personal workspace gets `available: false, reason: team_plan` from every rules read, and every product shows the Team plan notice instead of an empty list.
 - `app/rules.py` gains a surface registry: `SURFACES = {"extension": {"label": "Unlok Code", ...}, "browser": {...}, "optimus": {...}, "chat": {...}}`, served by `GET /v1/rules/surfaces` so the dashboard stops hardcoding the list. Adding a product is one entry.
 - `GET /v1/rules?surface=<name>` (new, `app/rules.py`), accepting either the API key (`authenticate`) or the dashboard session (`get_current_session`) through the existing `authenticate_dashboard_or_key` dependency Optimus already uses. Response:
 
@@ -45,25 +45,25 @@ The plan below fixes those first, then adds the two loaders. Every product ends 
 
 **Dashboard**
 
-- Governance › Workspace rules works on the personal workspace too (the same tab, the note about `~/.unlok` becomes a footnote: the extension still honours the file). The surface chips come from `/v1/rules/surfaces`.
+- Governance › Rules and policies keeps its Team plan notice on the personal workspace. The surface chips come from `/v1/rules/surfaces`.
 
 **Extension**
 
-- `fetchUnlokWorkspaceRules` calls `/v1/rules?surface=extension` with `If-None-Match` and keeps the current one minute cache. Personal server rules land in the personal tier next to `~/.unlok/UNLOK.md`; team rules stay the workspace tier. The rendered block is not used here because the extension merges local tiers by title; the ordering rules are the same.
+- `fetchUnlokWorkspaceRules` calls `/v1/rules?surface=extension` with `If-None-Match` and keeps the current one minute cache. Settings › Rules says "Workspace rules are part of the Team plan" when the key is personal. The rendered block is not used here because the extension merges local tiers by title; the ordering rules are the same.
 - Every chat completion carries `X-Unlok-Rules-Version` (the SDK's Unlok builtin gets a second header next to the session id).
 
-**Tests:** personal and team rows, the one owner constraint, version stability and change, 304 on match, `rendered` ordering, alias parity, `rules_version` on `/v1/me`, `request_meta.rules_version` on a completion.
+**Tests:** the Team plan answer on a personal key and session, version stability and change, 304 on match, `rendered` ordering, alias parity, `rules_version` on `/v1/me`, `request_meta.rules_version` on a completion.
 
 ## Phase B: Optimus
 
 Optimus is server side, so this is a backend change and every product's `/optimus` gets it at once: the extension's command, the dashboard's Ask Optimus, the Browser Agent's slash command.
 
-- `ask_optimus` loads the rules block for the caller's workspace (`auth.team_id` when set, else the caller's personal rules) with `surface="optimus"`. Note this is the workspace the key or session is acting in, which is separate from the `memory_team` grant that decides whose memories may be read: a member without that grant still answers under the team's rules.
+- `ask_optimus` loads the rules block for the caller's team workspace (`auth.team_id`; a personal caller gets none) with `surface="optimus"`. Note this is the workspace the key or session is acting in, which is separate from the `memory_team` grant that decides whose memories may be read: a member without that grant still answers under the team's rules.
 - `run_optimus` takes `rules_block: str | None` and prepends it to `_OPTIMUS_ANSWER_SYSTEM_PROMPT` for the answer call only. The digest build does not change: rules govern how Optimus answers, not what the bank contains.
 - In process cache keyed by `(workspace, surface)` for sixty seconds, invalidated by version, so a burst of questions does not re-read the table.
 - `OptimusResponse` gains `rules_version`, and the answer's usage event records it.
 
-**Tests:** a policy in the workspace reaches the answer call's system prompt; personal rules apply on the personal workspace; a member without `memory_team` still gets team rules; cache hit within the window, miss after a version change.
+**Tests:** a policy in the workspace reaches the answer call's system prompt; a personal caller's prompt carries no block; a member without `memory_team` still gets team rules; cache hit within the window, miss after a version change.
 
 ## Phase B2: the dashboard chat
 
@@ -77,12 +77,12 @@ The chat on the dashboard sends its completions with the person's session, so th
 
 ## Phase C: the Browser Agent
 
-The Browser Agent runs as a device account (a personal workspace) or a connected Unlok account, so personal rules from Phase A matter here most.
+The Browser Agent runs as a device account (a personal workspace) until a person connects a team account, so most installs have no workspace rules and the store must say so plainly rather than fail.
 
 - `packages/storage/lib/settings/workspaceRules.ts`: a `createStorage` backed store `{version, workspace, rules, rendered, fetchedAt}` plus `refreshWorkspaceRules(baseUrl, apiKey)` that sends `If-None-Match` and keeps the stored copy on 304 or on any failure. A task never waits on the network for rules: refresh runs at task start with a two second budget, and the task uses whatever the store holds.
 - `Executor` reads the store once per task and hands `rendered` to `PlannerPrompt` and `NavigatorPrompt`, which append it after their templates (`BasePrompt` gets an optional `workspaceRulesBlock`). The planner gets the whole block; the navigator gets policies only, since its prompt is action oriented and every token there costs on each step.
 - Requests to `/v1/chat/completions` carry `X-Unlok-Rules-Version` from the store, so the Requests page shows what the agent ran under.
-- Options › Unlok account gains a read only "Workspace rules" list (title, kind, enforced, version, last refreshed) with a Refresh button and a link to Governance. Editing stays on the dashboard.
+- Options › Unlok account gains a read only "Workspace rules" list (title, kind, enforced, version, last refreshed) with a Refresh button and a link to Governance. On a device or personal account it shows the Team plan notice instead. Editing stays on the dashboard.
 - The `/optimus` command already goes through the backend and gets Phase B for free.
 
 **Tests:** the store keeps its copy on 304 and on failure; the planner prompt contains the block; the navigator prompt contains policies only; a task starts even when the backend is unreachable.
@@ -102,7 +102,7 @@ The templates that shipped map onto these where they can ("Only the sites named 
 
 ## Rollout order and sizes
 
-A, then B and B2, then C, then D. A is about a day, B half a day, B2 half a day, C a day and a half, D two days across the four enforcement points. Each phase ships on its own: after A nothing changes for members except personal rules appearing on Governance; after B every Optimus answer follows the workspace's rules; after C the Browser Agent does; D is where "policy" starts meaning something the model cannot talk its way past.
+A, then B and B2, then C, then D. A is about three quarters of a day, B half a day, B2 half a day, C a day and a half, D two days across the four enforcement points. Each phase ships on its own: after A nothing changes for members; after B every Optimus answer follows the workspace's rules; after C the Browser Agent does; D is where "policy" starts meaning something the model cannot talk its way past.
 
 ## Not in this plan
 
