@@ -179,17 +179,18 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 			// with a fresh, summarized context) without the legacy new_task tool.
 			// With no active task there is nothing to compact, so fall through to
 			// normal new-task handling.
-			if (
-				messages.length > 0 &&
-				(messageToSend === "/compact" || messageToSend === "/smol" || messageToSend === "/newtask")
-			) {
+			// Anything typed after the command ("/compact keep the migration
+			// numbers") is a focus for the summarizer, passed through as-is.
+			const compactCommand = /^\/(compact|smol|newtask)(?:\s+([\s\S]+))?$/.exec(messageToSend.trim())
+			if (messages.length > 0 && compactCommand) {
+				const focus = compactCommand[2]?.trim()
 				// Clear the input before awaiting the RPC — condense resolves only
 				// after compaction finishes, and the typed command lingering in the
 				// field the whole time reads as if the send didn't register.
 				setInputValue("")
 				setActiveQuote(null)
-				await SlashServiceClient.condense(StringRequest.create({ value: "compact" })).catch((err) =>
-					console.error("Failed to compact task:", err),
+				await SlashServiceClient.condense(StringRequest.create({ value: focus ? `compact ${focus}` : "compact" })).catch(
+					(err) => console.error("Failed to compact task:", err),
 				)
 				reengageAutoScrollBriefly(chatState)
 				return

@@ -13,6 +13,11 @@ vi.mock("@cline/core", () => ({
 
 const mockCreateContextCompactionPrepareTurn = createContextCompactionPrepareTurn as unknown as ReturnType<typeof vi.fn>
 
+const mockCompactThroughUnlok = vi.fn()
+vi.mock("./unlok-compaction", () => ({
+	compactThroughUnlok: (...args: unknown[]) => mockCompactThroughUnlok(...args),
+}))
+
 vi.mock("@/shared/services/Logger", () => ({
 	Logger: {
 		debug: vi.fn(),
@@ -374,6 +379,117 @@ describe("SdkCompactionCoordinator", () => {
 	})
 })
 
+describe("SdkCompactionCoordinator on Unlok", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	const threeMessages = [
+		{ role: "user", content: "1" },
+		{ role: "assistant", content: "2" },
+		{ role: "user", content: "3" },
+	]
+
+	it("folds through the backend, persists its sidecar and never runs the local summarizer", async () => {
+		const activeSession = makeActiveSession()
+		activeSession.sdkHost.readMessages.mockResolvedValueOnce(threeMessages)
+		const { coordinator, options } = makeCoordinator({ activeSession, providerId: "unlok", unlokApiKey: "unlok_key" })
+		mockCompactThroughUnlok.mockResolvedValueOnce({
+			kind: "compacted",
+			messages: [{ role: "user", content: "note" }],
+			compactionState: { version: 1, messages: [{ role: "user", content: "note" }] },
+			summary: "note",
+			messagesFolded: 2,
+			provider: "gemini",
+			model: "gemini-flash-latest",
+		})
+
+		await coordinator.compactTask("the auth bug")
+
+		expect(mockCompactThroughUnlok).toHaveBeenCalledWith({
+			apiKey: "unlok_key",
+			sessionId: "old-session",
+			messages: threeMessages,
+			focus: "the auth bug",
+		})
+		expect(mockCreateContextCompactionPrepareTurn).not.toHaveBeenCalled()
+		expect(activeSession.sdkHost.updateSessionCompactionState).toHaveBeenCalledWith("old-session", {
+			version: 1,
+			messages: [{ role: "user", content: "note" }],
+		})
+		const rows = compactionRows(options)
+		expect(rows[0].info).toMatchObject({ status: "started", mode: "manual" })
+		expect(rows[1].info).toMatchObject({ status: "completed", mode: "manual", messagesBefore: 3, messagesAfter: 1 })
+	})
+
+	it("falls back to the local summarizer when the backend is unavailable", async () => {
+		const activeSession = makeActiveSession()
+		activeSession.sdkHost.readMessages.mockResolvedValueOnce(threeMessages)
+		const { coordinator, options } = makeCoordinator({ activeSession, providerId: "unlok", unlokApiKey: "unlok_key" })
+		mockCompactThroughUnlok.mockResolvedValueOnce({ kind: "unavailable", reason: "status 503" })
+		mockCreateContextCompactionPrepareTurn.mockReturnValueOnce(
+			vi.fn().mockResolvedValue({ messages: [{ role: "user", content: "local summary" }] }),
+		)
+
+		await coordinator.compactTask()
+
+		expect(mockCreateContextCompactionPrepareTurn).toHaveBeenCalledTimes(1)
+		expect(activeSession.sdkHost.updateSessionCompactionState).toHaveBeenCalledWith("old-session", {
+			version: 1,
+			messages: [{ role: "user", content: "local summary" }],
+		})
+		const rows = compactionRows(options)
+		expect(rows.at(-1)?.info).toMatchObject({ status: "completed", mode: "manual", messagesBefore: 3, messagesAfter: 1 })
+	})
+
+	it("shows a skipped divider and an explanation when the backend declines", async () => {
+		const activeSession = makeActiveSession()
+		activeSession.sdkHost.readMessages.mockResolvedValueOnce(threeMessages)
+		const { coordinator, options } = makeCoordinator({ activeSession, providerId: "unlok", unlokApiKey: "unlok_key" })
+		mockCompactThroughUnlok.mockResolvedValueOnce({ kind: "skipped", reason: "too_short" })
+
+		await coordinator.compactTask()
+
+		expect(mockCreateContextCompactionPrepareTurn).not.toHaveBeenCalled()
+		expect(activeSession.sdkHost.updateSessionCompactionState).not.toHaveBeenCalled()
+		const rows = compactionRows(options)
+		expect(rows.at(-1)?.info).toMatchObject({ status: "skipped", mode: "manual" })
+		const infos = options.messages.appendAndEmit.mock.calls
+			.flatMap((call) => call[0] as Array<{ say?: string; text?: string }>)
+			.filter((message) => message.say === "info")
+			.map((message) => message.text)
+		expect(infos.some((text) => text?.includes("Nothing to compact yet"))).toBe(true)
+	})
+
+	it("stays local when the provider is Unlok but no key is connected", async () => {
+		const activeSession = makeActiveSession()
+		activeSession.sdkHost.readMessages.mockResolvedValueOnce(threeMessages)
+		const { coordinator } = makeCoordinator({ activeSession, providerId: "unlok", unlokApiKey: undefined })
+		mockCreateContextCompactionPrepareTurn.mockReturnValueOnce(
+			vi.fn().mockResolvedValue({ messages: [{ role: "user", content: "local summary" }] }),
+		)
+
+		await coordinator.compactTask()
+
+		expect(mockCompactThroughUnlok).not.toHaveBeenCalled()
+		expect(mockCreateContextCompactionPrepareTurn).toHaveBeenCalledTimes(1)
+	})
+
+	it("leaves other providers on the local summarizer", async () => {
+		const activeSession = makeActiveSession()
+		activeSession.sdkHost.readMessages.mockResolvedValueOnce(threeMessages)
+		const { coordinator } = makeCoordinator({ activeSession, providerId: "anthropic", unlokApiKey: "unlok_key" })
+		mockCreateContextCompactionPrepareTurn.mockReturnValueOnce(
+			vi.fn().mockResolvedValue({ messages: [{ role: "user", content: "local summary" }] }),
+		)
+
+		await coordinator.compactTask()
+
+		expect(mockCompactThroughUnlok).not.toHaveBeenCalled()
+		expect(mockCreateContextCompactionPrepareTurn).toHaveBeenCalledTimes(1)
+	})
+})
+
 /** Collect all say:"compaction" rows emitted through appendAndEmit, in order. */
 function compactionRows(options: { messages: { appendAndEmit: ReturnType<typeof vi.fn> } }) {
 	return options.messages.appendAndEmit.mock.calls
@@ -385,6 +501,8 @@ function compactionRows(options: { messages: { appendAndEmit: ReturnType<typeof 
 interface MakeCoordinatorInput {
 	activeSession: ReturnType<typeof makeActiveSession> | undefined
 	displayedTaskId: string | undefined
+	providerId: string
+	unlokApiKey: string | undefined
 }
 
 function makeCoordinator(input: Partial<MakeCoordinatorInput> = {}) {
@@ -392,9 +510,10 @@ function makeCoordinator(input: Partial<MakeCoordinatorInput> = {}) {
 	// The isolated session used to resume a displayed task; its host owns the
 	// session and is where the sidecar is persisted and its transcript is read.
 	const resumedHost = makeSessionHost()
+	const providerId = input.providerId ?? "anthropic"
 	const config = {
-		providerConfig: { providerId: "anthropic", modelId: "claude" },
-		providerId: "anthropic",
+		providerConfig: { providerId, modelId: "claude" },
+		providerId,
 		modelId: "claude",
 		knownModels: undefined,
 		compaction: undefined,
@@ -405,6 +524,7 @@ function makeCoordinator(input: Partial<MakeCoordinatorInput> = {}) {
 	const options = {
 		stateManager: {
 			getGlobalSettingsKey: vi.fn(() => "act"),
+			getApiConfiguration: vi.fn(() => ({ unlokApiKey: input.unlokApiKey })),
 		} as unknown as StateManager,
 		sessions: {
 			getActiveSession: vi.fn(() => activeSession),

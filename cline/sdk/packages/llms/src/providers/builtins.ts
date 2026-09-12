@@ -919,7 +919,23 @@ const OPENAI_COMPATIBLE_SPEC_OVERRIDES: BuiltinSpecOverride[] = [
 		// discount. Scoped by model family internally (routing.promptCache's
 		// "anthropic-compatible" matcher), so this has no effect when Unlok
 		// resolves to an OpenAI/Groq/Gemini model.
-		metadata: ANTHROPIC_ROUTING_METADATA,
+		//
+		// stickySession: every request carries the conversation's own id as
+		// X-Unlok-Session-Id. The backend keys its ConversationSession (tier,
+		// sticky provider, rolling summary, memory bank rows) on this id
+		// first and on the message-prefix fingerprint only as a fallback, so
+		// continuity survives the client rewriting its history after a
+		// compaction. A header, not the JSON body: the body is a plain
+		// OpenAI-shaped payload and unknown fields there are rejected by
+		// some upstream vendors the gateway forwards to.
+		metadata: {
+			...ANTHROPIC_ROUTING_METADATA,
+			stickySession: {
+				transport: "header",
+				field: "X-Unlok-Session-Id",
+				metadataKey: "sessionId",
+			},
+		},
 	},
 	{
 		id: "nousResearch",

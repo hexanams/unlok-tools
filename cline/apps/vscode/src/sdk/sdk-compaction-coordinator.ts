@@ -38,6 +38,7 @@ import type { SdkSessionRebuildScheduler } from "./sdk-session-rebuild-scheduler
 import type { SdkTaskHistory } from "./sdk-task-history"
 import { prepareTaskResumeStartInput } from "./sdk-task-resume"
 import type { SdkSessionHost } from "./session-host"
+import { compactThroughUnlok } from "./unlok-compaction"
 
 const COMPACTION_FAILURE_MESSAGE = "Couldn't compact the conversation. Please try again."
 const COMPACTION_UNSUPPORTED_MESSAGE = "Compaction is not supported by this runtime yet. Please update Cline and try again."
@@ -59,6 +60,20 @@ export interface SdkCompactionCoordinatorOptions {
 	postStateToWebview: () => Promise<void>
 }
 
+function describeSkippedCompaction(reason: string): string {
+	switch (reason) {
+		case "too_short":
+		case "empty":
+			return "Nothing to compact yet. The conversation is still short enough to keep as it is."
+		case "too_small":
+			return "Nothing to compact yet. The earlier turns are smaller than the note would be."
+		case "empty_summary":
+			return "Unlok could not write a summary this time. Try again in a moment."
+		default:
+			return "Nothing was compacted."
+	}
+}
+
 export class SdkCompactionCoordinator {
 	private compactInFlight = false
 
@@ -69,7 +84,7 @@ export class SdkCompactionCoordinator {
 	 * (alias `/smol`) local command. No-ops with a status message when there is
 	 * nothing to compact or a turn is running.
 	 */
-	async compactTask(): Promise<void> {
+	async compactTask(focus?: string): Promise<void> {
 		if (this.compactInFlight) {
 			Logger.warn("[SdkController] compactTask: a compaction is already in progress; ignoring")
 			return
@@ -105,7 +120,7 @@ export class SdkCompactionCoordinator {
 						await this.options.postStateToWebview()
 						return
 					}
-					await this.runCompaction(current.sdkHost, current.sessionId)
+					await this.runCompaction(current.sdkHost, current.sessionId, focus)
 				})
 			} catch (error) {
 				Logger.error("[SdkController] compactTask failed:", error)
@@ -127,7 +142,7 @@ export class SdkCompactionCoordinator {
 
 		this.compactInFlight = true
 		try {
-			await this.compactDisplayedTask(displayedTaskId)
+			await this.compactDisplayedTask(displayedTaskId, focus)
 		} catch (error) {
 			Logger.error("[SdkController] compactTask failed:", error)
 			this.emitInfo(COMPACTION_FAILURE_MESSAGE, displayedTaskId)
@@ -143,7 +158,7 @@ export class SdkCompactionCoordinator {
 	 * session-rebuild mutex so a concurrent follow-up cannot resume the same task
 	 * in parallel; the follow-up waits, then reads the sidecar this persisted.
 	 */
-	private async compactDisplayedTask(taskId: string): Promise<void> {
+	private async compactDisplayedTask(taskId: string, focus?: string): Promise<void> {
 		await this.options.rebuilds.runExclusive(async () => {
 			// Another path may have made this task active while we waited for the
 			// mutex. If so, compact that live session instead of resuming a second.
@@ -158,7 +173,7 @@ export class SdkCompactionCoordinator {
 					await this.options.postStateToWebview()
 					return
 				}
-				await this.runCompaction(active.sdkHost, taskId)
+				await this.runCompaction(active.sdkHost, taskId, focus)
 				return
 			}
 
@@ -185,7 +200,7 @@ export class SdkCompactionCoordinator {
 				// Starting may persist legacy conversion. Once it succeeds, complete
 				// compaction even if navigation changes the displayed/active task. The
 				// isolated host owns this session, while UI emitters fence stale rows.
-				await this.runCompaction(sdkHost, sessionId)
+				await this.runCompaction(sdkHost, sessionId, focus)
 			} finally {
 				try {
 					if (sessionId) {
@@ -198,7 +213,7 @@ export class SdkCompactionCoordinator {
 		})
 	}
 
-	private async runCompaction(sdkHost: SdkSessionHost, sessionId: string): Promise<void> {
+	private async runCompaction(sdkHost: SdkSessionHost, sessionId: string, focus?: string): Promise<void> {
 		if (!sdkHost.updateSessionCompactionState) {
 			this.emitInfo(COMPACTION_UNSUPPORTED_MESSAGE, sessionId)
 			await this.options.postStateToWebview()
@@ -221,6 +236,43 @@ export class SdkCompactionCoordinator {
 		const compactionTs = Date.now()
 		this.emitCompactionRow({ status: "started", mode: "manual" }, compactionTs, sessionId)
 		await this.options.postStateToWebview()
+
+		// On Unlok the backend folds the conversation: same summarizer the
+		// gateway uses on escalation, a memory bank row, and the session keeps
+		// its tier. Anything short of an answer falls through to the local path.
+		const unlokApiKey = config.providerId === "unlok" ? this.unlokApiKey() : undefined
+		if (unlokApiKey) {
+			try {
+				const outcome = await compactThroughUnlok({ apiKey: unlokApiKey, sessionId, messages, focus })
+				if (outcome.kind === "compacted") {
+					const persisted = await sdkHost.updateSessionCompactionState(sessionId, outcome.compactionState)
+					if (!persisted.updated) {
+						throw new Error("Compaction sidecar could not be persisted.")
+					}
+					this.emitCompactionRow(
+						{ status: "completed", mode: "manual", messagesBefore, messagesAfter: outcome.messages.length },
+						compactionTs,
+						sessionId,
+					)
+					await this.options.postStateToWebview()
+					Logger.log(
+						`[SdkController] Compacted session ${sessionId} through Unlok (${outcome.provider ?? "?"}/${outcome.model ?? "?"}): ${messagesBefore} -> ${outcome.messages.length} messages`,
+					)
+					return
+				}
+				if (outcome.kind === "skipped") {
+					this.emitCompactionRow({ status: "skipped", mode: "manual" }, compactionTs, sessionId)
+					this.emitInfo(describeSkippedCompaction(outcome.reason), sessionId)
+					await this.options.postStateToWebview()
+					return
+				}
+				Logger.warn(`[SdkController] Unlok compaction unavailable (${outcome.reason}); compacting locally`)
+			} catch (error) {
+				this.emitCompactionRow({ status: "failed", mode: "manual" }, compactionTs, sessionId)
+				await this.options.postStateToWebview()
+				throw error
+			}
+		}
 
 		// The SDK reports the compaction's token/message counters through its
 		// status notices; capture the terminal one for the final divider.
@@ -282,6 +334,16 @@ export class SdkCompactionCoordinator {
 			this.emitCompactionRow({ status: "failed", mode: "manual" }, compactionTs, sessionId)
 			await this.options.postStateToWebview()
 			throw error
+		}
+	}
+
+	/** The active workspace's key; undefined when the state manager has none (or is a test double without one). */
+	private unlokApiKey(): string | undefined {
+		try {
+			const key = this.options.stateManager.getApiConfiguration()?.unlokApiKey
+			return typeof key === "string" && key.trim() ? key : undefined
+		} catch {
+			return undefined
 		}
 	}
 

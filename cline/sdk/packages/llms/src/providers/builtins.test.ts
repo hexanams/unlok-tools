@@ -61,6 +61,20 @@ describe("cline builtin spec defaults.baseUrl", () => {
 	});
 });
 
+describe("unlok builtin spec", () => {
+	it("names the conversation to the gateway through an X-Unlok-Session-Id header", () => {
+		const spec = BUILTIN_SPECS.find((s) => s.id === "unlok");
+		expect(spec).toBeDefined();
+		expect(spec?.metadata?.stickySession).toEqual({
+			transport: "header",
+			field: "X-Unlok-Session-Id",
+			metadataKey: "sessionId",
+		});
+		// The Anthropic prompt-cache routing it already had must survive the merge.
+		expect(spec?.metadata?.routing).toBeDefined();
+	});
+});
+
 describe("cline builtin models", () => {
 	it("exposes its canonical default model ID", () => {
 		expect(findClineSpec().defaultModelId).toBe(CLINE_DEFAULT_MODEL_ID);

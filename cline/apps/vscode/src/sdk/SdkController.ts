@@ -1497,8 +1497,8 @@ export class Controller {
 	 * and persists the compaction sidecar so the model's working context is
 	 * reduced on the next turn and later resumes.
 	 */
-	async compactTask(): Promise<void> {
-		await this.compaction.compactTask()
+	async compactTask(focus?: string): Promise<void> {
+		await this.compaction.compactTask(focus)
 	}
 
 	async clearTask(): Promise<void> {

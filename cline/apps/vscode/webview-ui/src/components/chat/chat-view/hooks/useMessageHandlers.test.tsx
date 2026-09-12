@@ -140,6 +140,19 @@ describe("useMessageHandlers — send routing", () => {
 		expect(trackIntent).not.toHaveBeenCalled()
 	})
 
+	it("passes the text typed after /compact through as the focus", async () => {
+		mockTurnState = { phase: "completed", seq: 7 }
+		const { result } = renderHook(() => useMessageHandlers(completedConversation, makeChatState(completedConversation)))
+
+		await act(async () => {
+			await result.current.handleSendMessage("/compact keep the migration numbers", [], [])
+		})
+
+		expect(condense).toHaveBeenCalledTimes(1)
+		expect(condense).toHaveBeenCalledWith(expect.objectContaining({ value: "compact keep the migration numbers" }))
+		expect(newTask).not.toHaveBeenCalled()
+	})
+
 	it("routes the /smol alias to the condense RPC as well", async () => {
 		mockTurnState = { phase: "completed", seq: 7 }
 		const { result } = renderHook(() => useMessageHandlers(completedConversation, makeChatState(completedConversation)))
