@@ -62,6 +62,7 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 		setPlanGenerationError,
 		isOptimusMode,
 		setIsOptimusMode,
+		setIsAskingOptimus,
 	} = chatState
 	const cancelInFlightRef = useRef(false)
 	const pendingResponseIdRef = useRef(0)
@@ -90,6 +91,25 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 				return
 			}
 
+			// Shared by the /optimus one-shot command and Optimus mode below --
+			// both ask the same way and need the same loading indicator, so
+			// there's one place that does it rather than two copies drifting
+			// apart. isAskingOptimus drives a small spinner (InputSection.tsx)
+			// for the duration of the round trip -- a digest rebuild (cache
+			// expired, or the first ask ever) is several LLM calls deep and can
+			// take real seconds, with no progress signal of its own otherwise.
+			const askOptimusQuestion = async (question: string) => {
+				setIsAskingOptimus(true)
+				try {
+					await OptimusServiceClient.askOptimus(AskOptimusRequest.create({ question }))
+				} catch (err) {
+					console.error("Failed to ask Optimus:", err)
+				} finally {
+					setIsAskingOptimus(false)
+				}
+				reengageAutoScrollBriefly(chatState)
+			}
+
 			// /optimus <question> -- answered from the signed-in Unlok
 			// account's (or pooled team's) already-digested memory bank, never
 			// expanded into the model's prompt like a normal chat turn. Works
@@ -113,10 +133,7 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 					return
 				}
 
-				await OptimusServiceClient.askOptimus(AskOptimusRequest.create({ question })).catch((err) =>
-					console.error("Failed to ask Optimus:", err),
-				)
-				reengageAutoScrollBriefly(chatState)
+				await askOptimusQuestion(question)
 				return
 			}
 
@@ -126,10 +143,7 @@ export function useMessageHandlers(messages: ClineMessage[], chatState: ChatStat
 			if (isOptimusMode && messageToSend && !messageToSend.startsWith("/")) {
 				setInputValue("")
 				setActiveQuote(null)
-				await OptimusServiceClient.askOptimus(AskOptimusRequest.create({ question: messageToSend })).catch((err) =>
-					console.error("Failed to ask Optimus:", err),
-				)
-				reengageAutoScrollBriefly(chatState)
+				await askOptimusQuestion(messageToSend)
 				return
 			}
 

@@ -74,6 +74,12 @@ export interface ChatState {
 	// instead of the running task -- local UI state, mirrors planModeSelected.
 	isOptimusMode: boolean
 	setIsOptimusMode: React.Dispatch<React.SetStateAction<boolean>>
+	// True for the duration of one askOptimus RPC round trip -- a digest
+	// rebuild (cache expired, or the first ask ever) is several LLM calls
+	// deep and can take real seconds, with no progress signal of its own,
+	// same shape as planGenerating/PlanEmptyState above for generatePlan.
+	isAskingOptimus: boolean
+	setIsAskingOptimus: React.Dispatch<React.SetStateAction<boolean>>
 
 	// Refs
 	textAreaRef: React.RefObject<HTMLTextAreaElement>

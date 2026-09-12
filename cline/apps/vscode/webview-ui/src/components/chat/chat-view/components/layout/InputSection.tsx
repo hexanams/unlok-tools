@@ -53,6 +53,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
 		setPlanRoutingPolicy,
 		isOptimusMode,
 		setIsOptimusMode,
+		isAskingOptimus,
 	} = chatState
 
 	const { isAtBottom, scrollToBottomAuto } = scrollBehavior
@@ -78,6 +79,21 @@ export const InputSection: React.FC<InputSectionProps> = ({
 			{isOptimusMode && (
 				<div style={{ marginBottom: "6px", marginTop: "10px" }}>
 					<OptimusModeBanner onExit={() => setIsOptimusMode(false)} />
+				</div>
+			)}
+
+			{isAskingOptimus && (
+				<div
+					style={{
+						display: "flex",
+						alignItems: "center",
+						gap: "6px",
+						margin: "10px 15px 6px 15px",
+						fontSize: "var(--vscode-editor-font-size)",
+						opacity: 0.9,
+					}}>
+					<span className="codicon codicon-loading codicon-modifier-spin" />
+					<span>Asking Optimus…</span>
 				</div>
 			)}
 
