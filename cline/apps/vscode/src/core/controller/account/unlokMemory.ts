@@ -60,6 +60,8 @@ export async function fetchUnlokWorkspaceRules(apiKey: string): Promise<UnlokWor
 	try {
 		const response = await axios.get(`${UNLOK_BASE_URL}/me/rules`, {
 			headers: headers(apiKey),
+			// Only the rules meant for the extension; browser agent and Optimus rules stay out of the prompt.
+			params: { surface: "extension" },
 			timeout: 8_000,
 			...getAxiosSettings(),
 		})
