@@ -1,6 +1,6 @@
 # Workspace rules across products
 
-**Status (2026-09-12):** Phase A shipped. Backend b5099f6 (`GET /v1/rules`, `/v1/rules/surfaces`, version and ETag, rendered block, `rules_version` on `/v1/me`, `X-Unlok-Rules-Version` recorded on requests), dashboard 7f897ee (chips from the registry, version on the tab and on Requests), extension 1268a0d (ETag cached fetch, the version header on every completion, the Team plan note under Settings › Rules). Phases B, B2, C and D are next, in that order.
+**Status (2026-09-12):** Phase A shipped. Backend b5099f6 (`GET /v1/rules`, `/v1/rules/surfaces`, version and ETag, rendered block, `rules_version` on `/v1/me`, `X-Unlok-Rules-Version` recorded on requests), dashboard 7f897ee (chips from the registry, version on the tab and on Requests), extension 1268a0d (ETag cached fetch, the version header on every completion, the Team plan note under Settings › Rules). Phase B shipped in backend 3233f26: Optimus reads the workspace's rules once when its digest is built and reuses them until it expires, so rules load on first launch rather than per message. Phases B2, C and D are next, in that order.
 
 ## Context
 
