@@ -2,7 +2,7 @@
 
 ## Context
 
-Workspace rules shipped on 2026-09-12 as a team owned list (`team_rules`) with a kind (instruction or policy), an enforced flag, and an `applies_to` set naming the products a rule is for: the VS Code extension, the Browser Agent, Optimus. Today only the extension loads them, through `GET /v1/me/rules?surface=extension`, merged with the repository's `.unlok` tier and the person's `~/.unlok/UNLOK.md`. The Browser Agent and Optimus store and display their rules but never read them.
+Workspace rules shipped on 2026-09-12 as a team owned list (`team_rules`) with a kind (instruction or policy), an enforced flag, and an `applies_to` set naming the products a rule is for: the VS Code extension, the Browser Agent, Optimus, and the dashboard's chat. Today only the extension loads them, through `GET /v1/me/rules?surface=extension`, merged with the repository's `.unlok` tier and the person's `~/.unlok/UNLOK.md`. The Browser Agent and Optimus store and display their rules but never read them.
 
 Three things stand in the way of "every product loads its rules" being one piece of work rather than three:
 
@@ -25,7 +25,7 @@ The plan below fixes those first, then adds the two loaders. Every product ends 
 **Backend**
 
 - `team_rules` gains `user_id` (nullable) and a check constraint that exactly one of `team_id`, `user_id` is set (migration 0044). The table keeps its name; the model gets a `workspace` view. Personal workspace rules are the person's own rows.
-- `app/rules.py` gains a surface registry: `SURFACES = {"extension": {"label": "Unlok Code", ...}, "browser": {...}, "optimus": {...}}`, served by `GET /v1/rules/surfaces` so the dashboard stops hardcoding the list. Adding a product is one entry.
+- `app/rules.py` gains a surface registry: `SURFACES = {"extension": {"label": "Unlok Code", ...}, "browser": {...}, "optimus": {...}, "chat": {...}}`, served by `GET /v1/rules/surfaces` so the dashboard stops hardcoding the list. Adding a product is one entry.
 - `GET /v1/rules?surface=<name>` (new, `app/rules.py`), accepting either the API key (`authenticate`) or the dashboard session (`get_current_session`) through the existing `authenticate_dashboard_or_key` dependency Optimus already uses. Response:
 
   ```json
@@ -65,6 +65,16 @@ Optimus is server side, so this is a backend change and every product's `/optimu
 
 **Tests:** a policy in the workspace reaches the answer call's system prompt; personal rules apply on the personal workspace; a member without `memory_team` still gets team rules; cache hit within the window, miss after a version change.
 
+## Phase B2: the dashboard chat
+
+The chat on the dashboard sends its completions with the person's session, so this is server side too and needs no client change to take effect.
+
+- `chat_completions` recognises a dashboard session caller (as opposed to an API key) and prepends the workspace's `chat` block as a system message, the same way the compacted summary is added today (`_apply_compacted_summary` already tolerates several system messages). Enforced first.
+- The chat page shows a small "Rules applied: N, version a1b2c3" line under the composer with a link to Governance, so a member can see the workspace's rules are in play without opening them.
+- The request's usage event records the rules version like every other surface.
+
+**Tests:** a session caller gets the block, an API key caller does not (the extension merges its own), the version is recorded.
+
 ## Phase C: the Browser Agent
 
 The Browser Agent runs as a device account (a personal workspace) or a connected Unlok account, so personal rules from Phase A matter here most.
@@ -92,7 +102,7 @@ The templates that shipped map onto these where they can ("Only the sites named 
 
 ## Rollout order and sizes
 
-A, then B, then C, then D. A is about a day, B half a day, C a day and a half, D two days across the four enforcement points. Each phase ships on its own: after A nothing changes for members except personal rules appearing on Governance; after B every Optimus answer follows the workspace's rules; after C the Browser Agent does; D is where "policy" starts meaning something the model cannot talk its way past.
+A, then B and B2, then C, then D. A is about a day, B half a day, B2 half a day, C a day and a half, D two days across the four enforcement points. Each phase ships on its own: after A nothing changes for members except personal rules appearing on Governance; after B every Optimus answer follows the workspace's rules; after C the Browser Agent does; D is where "policy" starts meaning something the model cannot talk its way past.
 
 ## Not in this plan
 
