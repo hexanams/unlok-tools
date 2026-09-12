@@ -19,3 +19,7 @@ endpoints:
       titleConvo: true
       titleModel: 'anthropic/claude-sonnet-5'
       modelDisplayLabel: 'Unlok'
+      # Tells the gateway these completions are the dashboard chat, so it adds
+      # the workspace's rules marked for Chat (see unlok-backend app/rules.py).
+      headers:
+        X-Unlok-Surface: 'chat'
