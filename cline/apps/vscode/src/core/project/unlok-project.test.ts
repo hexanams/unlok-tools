@@ -12,6 +12,8 @@ import {
 	scaffoldUnlokProject,
 	type UnlokRule,
 	workspaceRulesToTier,
+	hostAllowedByDomains,
+	toolDenialReason,
 } from "./unlok-project"
 
 let root: string
@@ -188,5 +190,28 @@ describe("mergeRules", () => {
 		expect(text.indexOf("## Budget")).toBeLessThan(text.indexOf("## Tone (workspace rule)"))
 		expect(text).toContain("## Testing (repository rule)")
 		expect(renderRulesSection(mergeRules({}))).toBe("")
+	})
+})
+
+describe("typed policies the extension enforces", () => {
+	it("matches a domain and its subdomains, with or without the wildcard prefix", () => {
+		expect(hostAllowedByDomains("docs.example.com", ["example.com"])).toBe(true)
+		expect(hostAllowedByDomains("EXAMPLE.com", ["*.example.com"])).toBe(true)
+		expect(hostAllowedByDomains("example.com.evil.net", ["example.com"])).toBe(false)
+		expect(hostAllowedByDomains("other.org", ["example.com", "*.acme.io"])).toBe(false)
+		expect(hostAllowedByDomains("", ["example.com"])).toBe(false)
+	})
+
+	it("refuses a web fetch outside the allowed domains and names the policy", () => {
+		const policies = { allowed_domains: { titles: ["Only our sites"], domains: ["example.com"] } }
+		expect(toolDenialReason("web_fetch", { url: "https://docs.example.com/x" }, policies)).toBeUndefined()
+		const reason = toolDenialReason("fetch_web_content", { url: "https://evil.net/" }, policies)
+		expect(reason).toContain('workspace policy "Only our sites"')
+		expect(reason).toContain("evil.net")
+		// Other tools, malformed input, and workspaces without the policy are untouched.
+		expect(toolDenialReason("read_file", { path: "https://evil.net" }, policies)).toBeUndefined()
+		expect(toolDenialReason("web_fetch", { url: "not a url" }, policies)).toBeUndefined()
+		expect(toolDenialReason("web_fetch", { url: "https://evil.net/" }, {})).toBeUndefined()
+		expect(toolDenialReason("web_fetch", { url: "https://evil.net/" }, undefined)).toBeUndefined()
 	})
 })

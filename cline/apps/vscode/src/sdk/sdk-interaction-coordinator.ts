@@ -22,6 +22,8 @@ export interface SdkInteractionCoordinatorOptions {
 	getSessionId: () => string
 	postStateToWebview: () => Promise<void>
 	shouldAutoApproveTool?: (request: ToolApprovalRequest) => boolean
+	/** A reason to refuse the tool outright under a workspace policy; checked before any approval. */
+	denyTool?: (request: ToolApprovalRequest) => string | undefined
 	recordApprovedToolMessage?: (toolCallId: string, messageTs: number) => void
 	recordDeniedToolApproval?: (toolCallId: string, toolName: string, reason: string) => void
 	/**
@@ -92,6 +94,13 @@ export class SdkInteractionCoordinator {
 	}
 
 	async handleRequestToolApproval(request: ToolApprovalRequest): Promise<{ approved: boolean; reason?: string }> {
+		// A workspace policy enforced in code (allowed domains): refused
+		// before auto approval or the approval UI can say yes.
+		const denial = this.options.denyTool?.(request)
+		if (denial) {
+			Logger.log(`[SdkController] Refusing tool under a workspace policy: tool=${request.toolName}`)
+			return { approved: false, reason: denial }
+		}
 		if (request.policy.autoApprove === true || this.options.shouldAutoApproveTool?.(request) === true) {
 			Logger.log(`[SdkController] Auto-approving tool execution: tool=${request.toolName}`)
 			return { approved: true }

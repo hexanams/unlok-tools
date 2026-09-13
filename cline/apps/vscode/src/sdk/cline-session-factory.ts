@@ -1037,7 +1037,9 @@ export async function buildSessionConfig(input: SessionConfigInput): Promise<Cor
 		const isNewTask = !input.historyItem
 		const unlokKey = isUnlokRoutedProvider && apiKey ? apiKey : undefined
 		const [rulesResult, memoryIndex] = await Promise.all([
-			unlokKey ? fetchUnlokWorkspaceRules(unlokKey) : Promise.resolve({ rules: [], version: "0", available: false }),
+			unlokKey
+				? fetchUnlokWorkspaceRules(unlokKey)
+				: Promise.resolve({ rules: [], version: "0", available: false, policies: {} }),
 			unlokKey && isNewTask ? fetchUnlokMemoryIndex(unlokKey) : Promise.resolve([]),
 		])
 		// Every completion in this session says which rules version it carried

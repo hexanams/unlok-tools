@@ -517,3 +517,58 @@ export async function loadEffectiveRules(root: string, workspaceRules: Workspace
 	const [repo, personal] = await Promise.all([loadRepoRules(root), loadPersonalRules()])
 	return mergeRules({ workspace: workspaceRulesToTier(workspaceRules), repo, personal })
 }
+
+// ---- typed policies the extension enforces itself -------------------------
+
+/**
+ * Whether `host` is covered by a workspace "allowed domains" policy. An entry
+ * covers itself and every subdomain; "*.example.com" means the same as
+ * "example.com". Case does not matter.
+ */
+export function hostAllowedByDomains(host: string, domains: string[]): boolean {
+	const h = host.trim().toLowerCase()
+	if (!h) {
+		return false
+	}
+	return domains.some((entry) => {
+		const bare = entry.trim().toLowerCase().replace(/^\*\./, "")
+		return bare.length > 0 && (h === bare || h.endsWith(`.${bare}`))
+	})
+}
+
+const WEB_FETCH_TOOLS = new Set(["web_fetch", "fetch_web_content"])
+
+/**
+ * Why a tool call must be refused under the workspace's typed policies, or
+ * undefined when it may run. Today: the web fetch tools against an address
+ * outside the "allowed domains" policy. The reason goes back to the model,
+ * naming the policy, so it reports instead of retrying.
+ */
+export function toolDenialReason(
+	toolName: string,
+	input: unknown,
+	policies: Record<string, { titles?: string[]; domains?: string[] }> | undefined,
+): string | undefined {
+	const entry = policies?.allowed_domains
+	if (!entry?.domains?.length || !WEB_FETCH_TOOLS.has(toolName)) {
+		return undefined
+	}
+	const url = (input as { url?: unknown } | undefined)?.url
+	if (typeof url !== "string") {
+		return undefined
+	}
+	let host: string
+	try {
+		host = new URL(url).hostname
+	} catch {
+		return undefined
+	}
+	if (hostAllowedByDomains(host, entry.domains)) {
+		return undefined
+	}
+	const title = entry.titles?.length ? entry.titles.join(", ") : "Allowed domains"
+	return (
+		`Blocked by the workspace policy "${title}": ${host} is not on the allowed domains ` +
+		`(${entry.domains.join(", ")}). Ask an owner or admin to add it under Governance, Rules and policies.`
+	)
+}

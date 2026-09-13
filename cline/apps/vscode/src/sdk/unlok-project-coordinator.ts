@@ -12,6 +12,7 @@ import {
 	type EffectiveRules,
 	loadEffectiveRules,
 	scaffoldUnlokProject,
+	toolDenialReason,
 	type UnlokProjectStatus,
 } from "@/core/project/unlok-project"
 import { dismissSetupForever, isSetupDismissedForever } from "@/core/project/unlok-project-context"
@@ -94,7 +95,7 @@ export class UnlokProjectCoordinator {
 	async workspaceRulesResult(): Promise<Awaited<ReturnType<typeof fetchUnlokWorkspaceRules>>> {
 		const apiKey = this.apiKey()
 		if (!apiKey || !this.activeIsUnlok()) {
-			return { rules: [], version: "0", available: false }
+			return { rules: [], version: "0", available: false, policies: {} }
 		}
 		if (this.rulesCache && this.rulesCache.apiKey === apiKey && Date.now() - this.rulesCache.at < WORKSPACE_RULES_TTL_MS) {
 			return this.rulesCache.result
@@ -117,6 +118,9 @@ export class UnlokProjectCoordinator {
 		if (!this.activeIsUnlok()) {
 			return
 		}
+		// Warm the rules cache so denyToolReason has the workspace's typed
+		// policies from the task's first tool call, not its second.
+		void this.workspaceRulesResult().catch(() => undefined)
 		try {
 			const root = await this.options.getWorkspaceRoot()
 			if (!root || this.shownFor.has(root)) {
@@ -186,6 +190,15 @@ export class UnlokProjectCoordinator {
 		if (mode === "never") {
 			await dismissSetupForever(root)
 		}
+	}
+
+	/**
+	 * Why a tool call must be refused under the workspace's typed policies
+	 * (allowed domains gate the web fetch tools), or undefined. Reads the
+	 * rules fetched for this session; nothing is loaded here.
+	 */
+	denyToolReason(toolName: string, input: unknown): string | undefined {
+		return toolDenialReason(toolName, input, this.rulesCache?.result.policies)
 	}
 
 	async effectiveRules(): Promise<{

@@ -25,7 +25,20 @@ export interface UnlokWorkspaceRuleRow {
 	title: string
 	body: string
 	enforced: boolean
+	/** Set when a product enforces the policy in code (allowed_domains, blocked_actions, spend_cap_per_task, model_allowlist). */
+	policyType: string | null
 }
+
+/** The workspace's typed policies merged per type, as the backend renders them under "policies". */
+export interface UnlokWorkspacePolicyEntry {
+	enforced: boolean
+	titles: string[]
+	domains?: string[]
+	actions?: string[]
+	usd?: number
+	models?: string[]
+}
+export type UnlokWorkspacePolicies = Record<string, UnlokWorkspacePolicyEntry>
 
 function headers(apiKey: string): Record<string, string> {
 	return { Authorization: `Bearer ${apiKey}` }
@@ -62,9 +75,11 @@ export interface UnlokWorkspaceRulesResult {
 	version: string
 	/** False on a personal key: rules are a Team plan feature. */
 	available: boolean
+	/** Typed policies the extension enforces itself: allowed_domains gates the web fetch tool. */
+	policies: UnlokWorkspacePolicies
 }
 
-const EMPTY_RULES: UnlokWorkspaceRulesResult = { rules: [], version: "0", available: false }
+const EMPTY_RULES: UnlokWorkspaceRulesResult = { rules: [], version: "0", available: false, policies: {} }
 
 // One entry per key: the last answer and its ETag, so the minute by minute
 // refresh is a conditional request the backend answers with a 304.
@@ -94,6 +109,7 @@ export async function fetchUnlokWorkspaceRules(apiKey: string): Promise<UnlokWor
 						title: String(r.title ?? ""),
 						body: String(r.body ?? ""),
 						enforced: Boolean(r.enforced),
+						policyType: typeof r.policy_type === "string" ? r.policy_type : null,
 					}
 				})
 			: []
@@ -101,6 +117,7 @@ export async function fetchUnlokWorkspaceRules(apiKey: string): Promise<UnlokWor
 			rules,
 			version: typeof data.version === "string" && data.version ? data.version : "0",
 			available: data.available !== false,
+			policies: parseWorkspacePolicies(data.policies),
 		}
 		const etag = String(response.headers?.etag ?? "").trim()
 		if (etag) {
@@ -111,6 +128,29 @@ export async function fetchUnlokWorkspaceRules(apiKey: string): Promise<UnlokWor
 		Logger.warn("[UnlokMemory] Could not load workspace rules:", error)
 		return cached?.result ?? EMPTY_RULES
 	}
+}
+
+function parseWorkspacePolicies(raw: unknown): UnlokWorkspacePolicies {
+	if (!raw || typeof raw !== "object") {
+		return {}
+	}
+	const out: UnlokWorkspacePolicies = {}
+	for (const [type, value] of Object.entries(raw as Record<string, unknown>)) {
+		if (!value || typeof value !== "object") {
+			continue
+		}
+		const entry = value as Record<string, unknown>
+		const strings = (v: unknown) => (Array.isArray(v) ? v.map(String) : undefined)
+		out[type] = {
+			enforced: Boolean(entry.enforced),
+			titles: strings(entry.titles) ?? [],
+			domains: strings(entry.domains),
+			actions: strings(entry.actions),
+			models: strings(entry.models),
+			usd: typeof entry.usd === "number" ? entry.usd : undefined,
+		}
+	}
+	return out
 }
 
 export async function rememberUnlokFact(
