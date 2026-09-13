@@ -1,5 +1,18 @@
 # Changelog
 
+## [4.1.29]
+
+First public release of Unlok Code on the VS Code Marketplace and Open VSX.
+
+### Added
+
+- Sign in with Unlok once and every request routes through your workspace: fast, cheap models for simple work, escalating to frontier models only when a task needs it. Each turn shows which model answered and what it cost.
+- Bring your own keys for Anthropic, OpenAI, Google Gemini, Groq and other providers, with the same cost and usage tracking either way.
+- Several Unlok workspaces can stay connected at once, with switching from Settings and an offered switch the moment the active workspace fails.
+- Workspace rules from Governance load into every task, merged with a single UNLOK.md in the repository.
+- Optimus, the workspace memory, can be asked from any task and its answer flows back into the running task.
+- /compact folds the conversation through Unlok so the session keeps its tier and sticky provider across the rewrite.
+
 ## [4.1.16]
 
 Everything here lands through the SDK bundle, so it applies to windows running that bundle.

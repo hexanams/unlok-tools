@@ -46,11 +46,19 @@ try {
 	}
 	execFileSync("vsce", vsceArgs, { stdio: "inherit" })
 
-	const ovsxArgs = ["ovsx", "publish", "--no-dependencies"]
-	if (isPrerelease) {
-		ovsxArgs.push("--pre-release")
+	// Open VSX (Cursor, Windsurf, VSCodium and other non Microsoft editors)
+	// is optional: with no OVSX_PAT in the environment the VS Code Marketplace
+	// publish above still counts as a successful release, and this step just
+	// says what it skipped instead of failing the whole run.
+	if (!process.env.OVSX_PAT) {
+		console.log("publish-marketplace: OVSX_PAT is not set, skipping the Open VSX publish.")
+	} else {
+		const ovsxArgs = ["ovsx", "publish", "--no-dependencies"]
+		if (isPrerelease) {
+			ovsxArgs.push("--pre-release")
+		}
+		execFileSync("npx", ovsxArgs, { stdio: "inherit" })
 	}
-	execFileSync("npx", ovsxArgs, { stdio: "inherit" })
 } finally {
 	if (!interrupted && !result.skipped) {
 		restore()

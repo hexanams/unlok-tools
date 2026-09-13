@@ -202,8 +202,7 @@ jobs:
                     exit 1
                   fi
                   if [[ -z "$OVSX_PAT" ]]; then
-                    echo "Error: OVSX_PAT is required to publish the stable Open VSX extension."
-                    exit 1
+                    echo "Notice: OVSX_PAT is not set, so this release goes to the VS Code Marketplace only. Add the secret to also publish to Open VSX."
                   fi
                   echo "Marketplace publish tokens are configured."
 
@@ -234,33 +233,6 @@ jobs:
                   echo "$CONTENT" >> $GITHUB_OUTPUT
                   echo "EOF" >> $GITHUB_OUTPUT
 
-                  # Slack section blocks reject text longer than 3000 characters, and
-                  # the Slack action logs that rejection WITHOUT failing the step - so
-                  # an over-long changelog silently drops the release announcement
-                  # while the run stays green. Post a trimmed copy to Slack and link
-                  # out to the full notes. The GitHub release body stays whole.
-                  RELEASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${{ steps.resolve_tag.outputs.tag }}"
-                  SLACK_CONTENT=$(CONTENT="$CONTENT" RELEASE_URL="$RELEASE_URL" python3 -c '
-                  import os
-                  content = os.environ["CONTENT"]
-                  more = "\n\n… <%s|Read the full release notes>" % os.environ["RELEASE_URL"]
-                  if len(content) <= 3000:
-                      print(content, end="")
-                  else:
-                      budget = 3000 - len(more)
-                      kept, used = [], 0
-                      for line in content.splitlines(keepends=True):
-                          if used + len(line) > budget:
-                              break
-                          kept.append(line)
-                          used += len(line)
-                      body = "".join(kept).rstrip() if kept else content[:budget].rstrip()
-                      print(body + more, end="")
-                  ')
-                  echo "slack_content<<SLACK_EOF" >> $GITHUB_OUTPUT
-                  echo "$SLACK_CONTENT" >> $GITHUB_OUTPUT
-                  echo "SLACK_EOF" >> $GITHUB_OUTPUT
-
             - name: Package and Publish Extension
               env:
                   VSCE_PAT: ${{ secrets.VSCE_PAT }}
@@ -288,7 +260,7 @@ jobs:
                   # is fully esbuild-bundled, and under the bun workspace the @cline/*
                   # deps are symlinks pointing outside the package, so without this vsce
                   # would walk them and pull the whole monorepo into the .vsix.
-                  vsce package --no-dependencies --allow-package-secrets sendgrid --out "cline-${{ steps.get_version.outputs.version }}.vsix"
+                  vsce package --no-dependencies --allow-package-secrets sendgrid --out "unlok-code-${{ steps.get_version.outputs.version }}.vsix"
 
                   # These scripts run under `node scripts/publish-marketplace.mjs`;
                   # bun run just launches them. Node + npm (for `npx ovsx`) come from
@@ -313,25 +285,3 @@ jobs:
                   prerelease: ${{ github.event.inputs.release-type == 'pre-release' }}
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-            - name: Post release to Slack
-              uses: slackapi/slack-github-action@v3.0.1
-              with:
-                  method: chat.postMessage
-                  token: ${{ secrets.SLACK_RELEASE_BOT_TOKEN }}
-                  payload: |
-                    channel: "C0APVKGGZFC"
-                    text: "Cline ${{ steps.resolve_tag.outputs.tag }}"
-                    blocks:
-                      - type: "section"
-                        text:
-                          type: "mrkdwn"
-                          text: "*Cline ${{ steps.resolve_tag.outputs.tag }}*"
-                      - type: "section"
-                        text:
-                          type: "mrkdwn"
-                          text: ${{ toJSON(steps.changelog.outputs.slack_content) }}
-                      - type: "context"
-                        elements:
-                          - type: "mrkdwn"
-                            text: "Full Changelog: https://github.com/${{ github.repository }}/compare/${{ steps.prev_tag.outputs.prev_tag }}...${{ steps.resolve_tag.outputs.tag }}"
